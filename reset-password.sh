@@ -18,7 +18,7 @@
 #   ./reset-password.sh -p 'NewPass!'            # local, supply it directly
 #   ./reset-password.sh --dsn postgres://u:p@h:5432/artex
 #   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -W pass -d artex
-#   ./reset-password.sh -m docker                # docker (reads POSTGRES_* from .env)
+#   ./reset-password.sh -m docker                # docker (uses the running database container settings)
 #   ./reset-password.sh -m docker -c pg --exec docker
 # Security: password via env var + psql \getenv (not argv), auto-escaped with
 # :'var'; the DB password goes through PGPASSWORD, also out of argv.
@@ -110,11 +110,16 @@ apply_config_fields() {
   done
 }
 
+compose=(docker compose)
+if [[ -f docker-compose.safe.yml ]]; then
+  compose+=(--env-file .env.safe -f docker-compose.safe.yml)
+fi
+
 # ---- Auto-detect mode ------------------------------------------------------
 if [[ -z "$MODE" ]]; then
   if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
     MODE="local"
-  elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
+  elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.safe.yml || -f docker-compose.yml ]]; then
     MODE="docker"
   else
     MODE="local"
@@ -183,7 +188,7 @@ if [[ "$MODE" == "local" ]]; then
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
   fi
 
-  if ! printf '%s\n' "$SQL" | psql "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
+  if ! printf '%s\n' "$SQL" | psql -X "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
     die "Write failed. If pgcrypto permissions/availability is reported, use a role with extension-creation privileges, or run CREATE EXTENSION pgcrypto manually first."
   fi
 
@@ -194,41 +199,39 @@ else
 
   # Choose the exec method: prefer docker compose exec (service name), otherwise docker exec (container name)
   if [[ -z "$EXEC_KIND" ]]; then
-    if docker compose version >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
+    if docker compose version >/dev/null 2>&1 && [[ -f docker-compose.safe.yml || -f docker-compose.yml ]]; then
       EXEC_KIND="compose"
     else
       EXEC_KIND="docker"
     fi
   fi
 
-  # psql credentials inside the container: prefer command line, then .env POSTGRES_*, then compose defaults (artex)
-  if [[ -f .env ]]; then
-    # shellcheck disable=SC1091
-    set -a; . ./.env; set +a
-  fi
-  DUSER="${USER:-${POSTGRES_USER:-artex}}"
-  DNAME="${DBNAME:-${POSTGRES_DB:-artex}}"
-  [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
-  [[ -z "${PGPASSWORD:-}" && -n "${POSTGRES_PASSWORD:-}" ]] && export PGPASSWORD="$POSTGRES_PASSWORD"
+  # The container already has its database settings. Never source a checkout's .env.
+  export PGUSER="${USER:-${POSTGRES_USER:-}}"
+  export PGDATABASE="${DBNAME:-${POSTGRES_DB:-}}"
+  export PGPASSWORD="${DBPASS:-${PGPASSWORD:-${POSTGRES_PASSWORD:-}}}"
 
-  info "Target: psql -U $DUSER -d $DNAME inside container $CONTAINER (exec=$EXEC_KIND)"
+  info "Target: database ${PGDATABASE:-from container settings} in $CONTAINER (exec=$EXEC_KIND)"
   if [[ "$ASSUME_YES" -ne 1 ]]; then
     read -r -p "Reset the ARTEX password in this container's database? [y/N] " ans
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
   fi
 
   # -e passes only the name, not the value → inherited from the current environment, so the password never appears in the docker command argv.
-  declare -a EXEC_CMD
   if [[ "$EXEC_KIND" == "compose" ]]; then
-    EXEC_CMD=(docker compose exec -T -e ARTEX_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
-              psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
+    EXEC_CMD=("${compose[@]}" exec -T)
   else
-    EXEC_CMD=(docker exec -i -e ARTEX_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
-              psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
+    EXEC_CMD=(docker exec -i)
   fi
+  EXEC_CMD+=(-e ARTEX_RESET_NEWPASS -e PGPASSWORD -e PGUSER -e PGDATABASE "$CONTAINER" sh -c '
+    export PGUSER="${PGUSER:-${POSTGRES_USER:-artex}}"
+    export PGDATABASE="${PGDATABASE:-${POSTGRES_DB:-artex}}"
+    export PGPASSWORD="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
+    exec psql -X -v ON_ERROR_STOP=1 -q
+  ')
 
   if ! printf '%s\n' "$SQL" | "${EXEC_CMD[@]}" >/dev/null; then
-    die "Write failed. Check the container name (-c), the database account (.env POSTGRES_*), and that the role has pgcrypto privileges."
+    die "Write failed. Check the container name (-c), the container database settings, and that the role has pgcrypto privileges."
   fi
 fi
 
