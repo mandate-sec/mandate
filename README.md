@@ -26,6 +26,8 @@ bash reset-password.sh -m docker --revoke-sessions
 
 For a native installation, use `-m local` with the same database configuration as the server. The command confirms the database target, revokes all sessions without a restart, and keeps the current administrator password. Change the password if it was also exposed. Without revocation, a copied session can remain usable until expiry.
 
+For local recovery, `bash reset-password.sh --service mandate-admin --revoke-sessions` uses a named [PostgreSQL service](https://www.postgresql.org/docs/16/libpq-pgservice.html). Keep the service configuration and any `passfile` it uses private. Connection strings supplied through `--dsn`, `ARTEX_PG_DSN`, or `config.json` are passed to `psql` as an argument, so keep passwords out of those strings when using the recovery script.
+
 If you used an older offline reset script to respond to a stolen session, upgrade and change the administrator password again. Installing the fix alone leaves the existing session generation in place. If the script printed a database connection string into a shared terminal log, rotate any database password it contained.
 
 Each console process permits ten sign-in or password-change attempts per minute per connecting IP address, including successful attempts. It processes at most two of these password checks at once. A throttled request receives HTTP 429 and a `Retry-After` header. Users behind one reverse proxy share its budget. For a deployment with multiple replicas, apply a shared sign-in limit at the ingress as well.

@@ -17,12 +17,13 @@
 #   ./reset-password.sh                          # local, prompt for a new password
 #   ./reset-password.sh --password-stdin -y < /private/path/password
 #   ./reset-password.sh --dsn postgres://u@h:5432/artex
+#   ./reset-password.sh --service mandate-admin   # reads libpq service settings
 #   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -d artex
 #   ./reset-password.sh -m docker                # docker (uses the running database container settings)
 #   ./reset-password.sh -m docker -c pg --exec docker
 #   ./reset-password.sh -m docker --revoke-sessions  # revoke sessions only
 # For automation, --password-stdin reads one line and preserves spaces.
-# The legacy -p and -W flags expose their values in process arguments.
+# Keep secrets out of -p, -W, and connection strings passed to psql.
 # =============================================================================
 set +ax
 set -euo pipefail
@@ -33,6 +34,7 @@ BCRYPT_COST=10
 
 MODE=""            # local | docker (empty = auto-detect)
 DSN=""
+SERVICE=""
 HOST="" PORT="" USER="" DBPASS="" DBNAME="" SSLMODE=""
 CONFIG=""
 CONTAINER=""       # postgres service/container name in docker mode (default: postgres)
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -m|--mode)        MODE="${2:-}"; [[ "$MODE" == local || "$MODE" == docker ]] || die "--mode requires local or docker"; shift 2 ;;
     --dsn)            DSN="${2:-}"; shift 2 ;;
+    --service)        SERVICE="${2:-}"; [[ -n "$SERVICE" ]] || die "--service requires a PostgreSQL service name"; shift 2 ;;
     -H|--host)        HOST="${2:-}"; shift 2 ;;
     -P|--port)        PORT="${2:-}"; shift 2 ;;
     -U|--user)        USER="${2:-}"; shift 2 ;;
@@ -73,6 +76,9 @@ done
 
 if [[ "$REVOKE_SESSIONS" == 1 && ( "$PASSWORD_STDIN" == 1 || "$PASSWORD_ARG" == 1 ) ]]; then
   die "--revoke-sessions cannot be combined with new password inputs"
+fi
+if [[ -n "$SERVICE" && -n "$DSN$HOST$PORT$USER$DBPASS$DBNAME$SSLMODE$CONFIG" ]]; then
+  die "--service cannot be combined with other database connection options"
 fi
 
 # ---- Read database.* from config.json (local mode only, when no connection is given explicitly) -----
@@ -149,7 +155,7 @@ fi
 if [[ -z "$MODE" ]]; then
   if [[ -n "$EXEC_KIND$CONTAINER" ]]; then
     MODE="docker"
-  elif [[ -n "$DSN$HOST$USER$DBNAME$CONFIG" || -n "${ARTEX_PG_DSN:-}${ARTEX_CONFIG:-}" || -f config.json ]]; then
+  elif [[ -n "$SERVICE$DSN$HOST$USER$DBNAME$CONFIG" || -n "${ARTEX_PG_DSN:-}${ARTEX_CONFIG:-}" || -f config.json ]]; then
     MODE="local"
   elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.safe.yml || -f docker-compose.yml ]]; then
     MODE="docker"
@@ -157,7 +163,7 @@ if [[ -z "$MODE" ]]; then
     MODE="local"
   fi
 fi
-if [[ "$MODE" == docker && -n "$DSN$HOST$PORT$SSLMODE$CONFIG" ]]; then
+if [[ "$MODE" == docker && -n "$SERVICE$DSN$HOST$PORT$SSLMODE$CONFIG" ]]; then
   die "Docker recovery cannot apply local connection options"
 fi
 if [[ "$MODE" == local && -n "$EXEC_KIND$CONTAINER" ]]; then
@@ -218,10 +224,10 @@ fi
 # ---- Execute ---------------------------------------------------------------
 if [[ "$MODE" == "local" ]]; then
   # Connection priority: command line > --dsn/$ARTEX_PG_DSN > config.json
-  if [[ -z "$CONFIG$DSN$HOST$USER$DBNAME" ]]; then
+  if [[ -z "$SERVICE$CONFIG$DSN$HOST$USER$DBNAME" ]]; then
     [[ -n "${ARTEX_PG_DSN:-}" ]] && DSN="$ARTEX_PG_DSN"
   fi
-  if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
+  if [[ -z "$SERVICE$DSN" && -z "$HOST$USER$DBNAME" ]]; then
     cfg="${CONFIG:-${ARTEX_CONFIG:-config.json}}"
     if [[ -n "$CONFIG${ARTEX_CONFIG:-}" && ! -f "$cfg" ]]; then
       die "selected database configuration must be an existing regular file"
@@ -236,7 +242,10 @@ if [[ "$MODE" == "local" ]]; then
   command -v psql >/dev/null 2>&1 || die "psql not found on this machine (install postgresql-client, or use -m docker)"
 
   declare -a PSQL_ARGS=()
-  if [[ -n "$DSN" ]]; then
+  if [[ -n "$SERVICE" ]]; then
+    export PGSERVICE="$SERVICE"
+    printf -v target 'PostgreSQL service %q' "$SERVICE"
+  elif [[ -n "$DSN" ]]; then
     PSQL_ARGS=(--dbname="$DSN")
     target="configured PostgreSQL connection (credentials hidden)"
   else

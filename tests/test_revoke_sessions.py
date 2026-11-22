@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 import uuid
 
 
@@ -38,8 +39,8 @@ class SessionRevocationTest(unittest.TestCase):
         command = [BASH, "reset-password.sh", "-m", "local", "--revoke-sessions", "--yes"]
         env = dict(os.environ, ARTEX_PG_DSN=dsn)
 
-        def revoke(*options):
-            return subprocess.run(command + list(options), cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+        def revoke(*options, environment=env):
+            return subprocess.run(command + list(options), cwd=ROOT, env=environment, stdin=subprocess.DEVNULL,
                                   capture_output=True, text=True, timeout=20)
 
         self.assertNotEqual(revoke().returncode, 0)
@@ -56,5 +57,20 @@ class SessionRevocationTest(unittest.TestCase):
             result = revoke()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("console sessions revoked", result.stdout)
+            self.assertNotEqual(psql(dsn, generation_query), before)
+
+        with tempfile.TemporaryDirectory() as directory:
+            service_file = Path(directory) / "pg_service.conf"
+            fields = {"host": admin.hostname, "port": admin.port or 5432, "dbname": name,
+                      "user": unquote(admin.username or ""), "sslmode": "disable"}
+            if admin.password is not None:
+                fields["password"] = unquote(admin.password)
+            service_file.write_text("[mandate-admin-test]\n" + "".join(f"{key}={value}\n" for key, value in fields.items()),
+                                    encoding="utf-8")
+            service_env = dict(env, PGSERVICEFILE=str(service_file), ARTEX_PG_DSN="postgres://fixture@127.0.0.1:1/unused")
+            before = psql(dsn, generation_query)
+            result = revoke("--service", "mandate-admin-test", environment=service_env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("PostgreSQL service mandate-admin-test", result.stderr)
             self.assertNotEqual(psql(dsn, generation_query), before)
         self.assertEqual(psql(dsn, "SELECT value FROM settings WHERE key='auth.password_hash'"), "fixture-hash")
