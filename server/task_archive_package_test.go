@@ -70,7 +70,12 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	extracted := filepath.Join(dataDir, "restore")
-	if err := extractTaskArchivePackage(archivePath, checksum, extracted); err != nil {
+	for _, size := range []int64{original - 1, original + 1, -1} {
+		if err := extractTaskArchivePackage(archivePath, checksum, t.TempDir(), size); err == nil {
+			t.Fatalf("accepted incorrect recorded size %d", size)
+		}
+	}
+	if err := extractTaskArchivePackage(archivePath, checksum, extracted, original); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(filepath.Join(extracted, filepath.FromSlash(pgdb.TaskArchiveLLMRecordsPath))); err != nil || !bytes.Equal(got, streamBody) {
@@ -89,7 +94,7 @@ func TestTaskArchivePackageFilesRoundTrip(t *testing.T) {
 			t.Fatalf("restored %s = %q, %v; want %q", path, got, err, want)
 		}
 	}
-	if err := extractTaskArchivePackage(archivePath, "deadbeef", filepath.Join(dataDir, "bad-checksum")); err == nil {
+	if err := extractTaskArchivePackage(archivePath, "deadbeef", filepath.Join(dataDir, "bad-checksum"), original); err == nil {
 		t.Fatal("checksum mismatch was accepted")
 	}
 }
@@ -111,12 +116,12 @@ func TestTaskArchivePackageSkipsSymlink(t *testing.T) {
 
 	archivePath := filepath.Join(dataDir, "archive.tar.zst")
 	snapshot := &pgdb.TaskArchiveSnapshot{FormatVersion: pgdb.TaskArchiveFormatVersion, TaskID: 42}
-	_, _, checksum, err := writeTaskArchivePackage(archivePath, payload, snapshot)
+	original, _, checksum, err := writeTaskArchivePackage(archivePath, payload, snapshot)
 	if err != nil {
 		t.Fatalf("archive should skip symlink, not fail: %v", err)
 	}
 	extracted := filepath.Join(dataDir, "restore")
-	if err := extractTaskArchivePackage(archivePath, checksum, extracted); err != nil {
+	if err := extractTaskArchivePackage(archivePath, checksum, extracted, original); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(filepath.Join(extracted, "keep.txt")); err != nil || string(got) != "keep me" {
@@ -247,7 +252,7 @@ func TestTaskArchivePackageRejectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := extractTaskArchivePackage(path, "", root); err == nil {
+	if err := extractTaskArchivePackage(path, "", root, int64(len(content))); err == nil {
 		t.Fatal("path traversal archive was accepted")
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "escape.txt")); !os.IsNotExist(err) {

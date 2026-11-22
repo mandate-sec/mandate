@@ -638,7 +638,10 @@ func writeTaskArchivePackage(path, payloadDir string, snapshot *pgdb.TaskArchive
 	return originalSize, compressedSize, checksum, nil
 }
 
-func extractTaskArchivePackage(path, expectedSHA, destination string) error {
+func extractTaskArchivePackage(path, expectedSHA, destination string, expectedSize int64) error {
+	if expectedSize < 0 || expectedSize > maxArchiveBytes {
+		return errors.New("invalid recorded task archive size")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -656,7 +659,9 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 			return err
 		}
 	}
-	decoder, err := zstd.NewReader(file)
+	consumedHash := sha256.New()
+	compressed := io.TeeReader(file, consumedHash)
+	decoder, err := zstd.NewReader(compressed, zstd.WithDecoderMaxWindow(64<<20), zstd.WithDecoderConcurrency(1))
 	if err != nil {
 		return err
 	}
@@ -665,6 +670,11 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 	if err := os.MkdirAll(destination, archiveDirMode); err != nil {
 		return err
 	}
+	root, err := os.OpenRoot(destination)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	var entries int
 	var total int64
 	for {
@@ -676,28 +686,25 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 			return err
 		}
 		entries++
-		if entries > maxArchiveFiles || header.Size < 0 || total+header.Size > maxArchiveBytes {
+		if entries > maxArchiveFiles || header.Size < 0 || header.Size > expectedSize-total {
 			return errors.New("task archive exceeds extraction safety limits")
 		}
 		total += header.Size
 		clean := filepath.Clean(filepath.FromSlash(header.Name))
-		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		top, _, _ := strings.Cut(filepath.ToSlash(clean), "/")
+		if clean == "." || !filepath.IsLocal(clean) || strings.EqualFold(strings.TrimRight(top, ". "), "restore-journal.json") {
 			return fmt.Errorf("unsafe task archive path %q", header.Name)
-		}
-		target := filepath.Join(destination, clean)
-		if relative, err := filepath.Rel(destination, target); err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("unsafe task archive target %q", header.Name)
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, archiveDirMode); err != nil {
+			if err := root.MkdirAll(clean, archiveDirMode); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), archiveDirMode); err != nil {
+			if err := root.MkdirAll(filepath.Dir(clean), archiveDirMode); err != nil {
 				return err
 			}
-			output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fs.FileMode(header.Mode)&0o777)
+			output, err := root.OpenFile(clean, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fs.FileMode(header.Mode)&0o700)
 			if err != nil {
 				return err
 			}
@@ -708,6 +715,17 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 			}
 		default:
 			return fmt.Errorf("unsupported task archive entry type %d", header.Typeflag)
+		}
+	}
+	if total != expectedSize {
+		return errors.New("task archive size differs from recorded size")
+	}
+	if expectedSHA != "" {
+		if _, err := io.Copy(io.Discard, compressed); err != nil {
+			return err
+		}
+		if !strings.EqualFold(hex.EncodeToString(consumedHash.Sum(nil)), expectedSHA) {
+			return errors.New("task archive changed during extraction")
 		}
 	}
 	return nil

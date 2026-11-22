@@ -266,7 +266,10 @@ func (s *Server) restoreTaskArchive(job *pgdb.TaskArchive) (runErr error) {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(extracted) }()
-	if err := extractTaskArchivePackage(job.ArchivePath, job.SHA256, extracted); err != nil {
+	if len(job.SHA256) != 64 {
+		return errors.New("task archive has no valid stored checksum")
+	}
+	if err := extractTaskArchivePackage(job.ArchivePath, job.SHA256, extracted, job.OriginalSize); err != nil {
 		return err
 	}
 	manifestRaw, err := os.ReadFile(filepath.Join(extracted, "manifest.json"))
