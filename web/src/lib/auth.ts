@@ -55,3 +55,22 @@ export const auth = {
     }
   },
 };
+
+export function isSessionRejected(response: Response): boolean {
+  return response.status === 401 && response.headers.get("WWW-Authenticate") === "Bearer";
+}
+
+export async function fetchConsoleAPI(path: string, init?: RequestInit): Promise<Response> {
+  const authorization = new Headers(init?.headers).get("Authorization");
+  const response = await fetch(path, { ...init, mode: "same-origin" });
+  if (isSessionRejected(response) && authorization) {
+    const currentToken = auth.getToken();
+    // Other tabs can sign in while the request is in flight. Discard the
+    // session only when the rejected credential is still the active one.
+    if (currentToken && authorization === `Bearer ${currentToken}`) {
+      auth.clearToken();
+      window.location.replace("/login");
+    }
+  }
+  return response;
+}

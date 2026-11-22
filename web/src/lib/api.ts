@@ -3,6 +3,7 @@
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
 // are passed through and formatted at the call site.
 
+import { fetchConsoleAPI, isSessionRejected } from "@/lib/auth";
 import type { ChatMention } from "@/lib/chat-mentions";
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
@@ -112,9 +113,7 @@ function getToken(): string | null {
   return localStorage.getItem("artex_token");
 }
 
-export function fetchConsoleAPI(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(path, { ...init, mode: "same-origin" });
-}
+export { fetchConsoleAPI };
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
@@ -127,12 +126,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
-  if (r.status === 401 && r.headers.get("WWW-Authenticate") === "Bearer") {
-    if (typeof window !== "undefined" && getToken() === token) {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
-      window.location.href = "/login";
-    }
+  if (isSessionRejected(r)) {
     throw new Error("Unauthorized");
   }
   if (!r.ok) {

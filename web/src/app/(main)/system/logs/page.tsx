@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { fetchConsoleAPI, openEventStream } from "@/lib/api";
+import { http, openEventStream } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -87,9 +87,7 @@ export default function LogsPage() {
     setLoadingHistory(true);
     try {
       const params = minDbId > 0 ? `?before=${minDbId}&limit=200` : `?limit=200`;
-      const res = await fetchConsoleAPI(`/api/logs/history${params}`);
-      if (!res.ok) return;
-      const data = await res.json() as { items: LogLine[]; has_more: boolean };
+      const data = await http<{ items: LogLine[]; has_more: boolean }>(`/logs/history${params}`);
       if (data.items?.length) {
         // Assign synthetic seq numbers below current minimum to keep dedup working.
         setLines((prev) => {
@@ -111,6 +109,8 @@ export default function LogsPage() {
         });
       }
       setHasMore(data.has_more ?? false);
+    } catch {
+      // Keep the current log view when an older page cannot be loaded.
     } finally {
       setLoadingHistory(false);
     }
