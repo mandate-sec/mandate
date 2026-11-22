@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -153,6 +154,10 @@ func (d Database) buildDSN() string {
 	if host == "" {
 		host = "127.0.0.1"
 	}
+	// JoinHostPort adds IPv6 brackets. Accept an already bracketed literal too.
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") && strings.Contains(host, ":") {
+		host = host[1 : len(host)-1]
+	}
 	port := d.Port
 	if port == 0 {
 		port = 5432
@@ -163,7 +168,7 @@ func (d Database) buildDSN() string {
 	}
 	u := url.URL{
 		Scheme: "postgres",
-		Host:   host + ":" + strconv.Itoa(port),
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
 		Path:   "/" + d.DBName,
 	}
 	if d.User != "" {

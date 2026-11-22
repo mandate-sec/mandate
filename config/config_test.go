@@ -1,10 +1,36 @@
 package config
 
 import (
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestDatabaseAddressAndCredentialRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ input, host string }{
+		{"::1", "::1"},
+		{"[::1]", "::1"},
+		{"fe80::1%eth0", "fe80::1%eth0"},
+		{"db.example", "db.example"},
+		{"", "127.0.0.1"},
+	} {
+		cfg := Database{Host: tc.input, User: "local@review", Password: "test:/@?#%", DBName: "review #1"}
+		u, err := url.Parse(cfg.buildDSN())
+		if err != nil {
+			t.Fatalf("could not parse generated URL for host %q", tc.input)
+		}
+		host, port, err := net.SplitHostPort(u.Host)
+		if err != nil || host != tc.host || port != "5432" {
+			t.Fatalf("host %q produced address %q", tc.input, u.Host)
+		}
+		password, ok := u.User.Password()
+		if !ok || password != cfg.Password || u.User.Username() != cfg.User || u.Path != "/"+cfg.DBName {
+			t.Fatalf("connection fields changed for host %q", tc.input)
+		}
+	}
+}
 
 func TestPostgresDSNPrecedence(t *testing.T) {
 	dir := t.TempDir()
