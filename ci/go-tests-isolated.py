@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import urllib.parse
 import uuid
@@ -18,6 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--output', default='artifacts/go-tests')
 parser.add_argument('--package', action='append', dest='packages')
 args = parser.parse_args()
+sys.stdout.reconfigure(errors='backslashreplace')
 admin = os.environ['ARTEX_TEST_ADMIN_DSN']
 try:
     admin_url = urllib.parse.urlsplit(admin)
@@ -54,7 +56,7 @@ def test_outcome(name, stdout):
 
 packages = subprocess.check_output([
     'go', 'list', '-f', '{{.ImportPath}}|{{.Dir}}|{{len .TestGoFiles}}|{{len .XTestGoFiles}}',
-    *(args.packages or ['./...'])], cwd=root, text=True).splitlines()
+    *(args.packages or ['./...'])], cwd=root, encoding='utf-8').splitlines()
 summary = {'passed': [], 'failed': [], 'skipped': [], 'skipped_subtests': []}
 with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
     for index, package in enumerate(packages):
@@ -63,12 +65,16 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
             continue
         binary = Path(temporary) / f'package-{index}.test'
         subprocess.run(['go', 'test', '-c', '-o', str(binary), import_path], cwd=root, check=True)
-        discovery_env = dict(os.environ)
-        # TestMain runs during listing too. An explicitly invalid DSN prevents
-        # it from falling back to a developer's configured database.
-        discovery_env['ARTEX_PG_DSN'] = 'postgres://%'
-        listing = subprocess.check_output([str(binary), '-test.list', '^Test'], cwd=directory,
-                                          env=discovery_env, text=True)
+        # TestMain can initialize the schema before listing any tests. Give
+        # discovery its own database so it can never modify a configured one.
+        discovery_db = 'artex_test_list_' + uuid.uuid4().hex
+        database_sql(f'CREATE DATABASE "{discovery_db}"')
+        try:
+            discovery_env = dict(os.environ, ARTEX_PG_DSN=test_dsn(discovery_db), NORMA_RIPGREP_NO_INSTALL='1')
+            listing = subprocess.check_output([str(binary), '-test.list', '^Test'], cwd=directory,
+                                              env=discovery_env, encoding='utf-8', timeout=30)
+        finally:
+            database_sql(f'DROP DATABASE "{discovery_db}" WITH (FORCE)')
         tests = [name for name in listing.splitlines() if re.fullmatch(r'Test\w+', name)]
         for name in tests:
             database = 'artex_test_' + uuid.uuid4().hex
@@ -79,10 +85,10 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
             try:
                 result = subprocess.run([str(binary), '-test.v', '-test.timeout=90s',
                                          '-test.run', '^' + re.escape(name) + '$'],
-                                        cwd=directory, env=env, capture_output=True, text=True,
-                                        timeout=100)
+                                        cwd=directory, env=env, capture_output=True,
+                                        encoding='utf-8', errors='backslashreplace', timeout=100)
                 log = result.stdout + result.stderr
-                (output / (key + '.log')).write_text(log)
+                (output / (key + '.log')).write_text(log, encoding='utf-8')
                 db_skipped = any(reason in log.lower() for reason in (
                     'postgres unavailable', 'no database config', 'requires isolated artex_pg_dsn'))
                 outcome = test_outcome(name, result.stdout)
@@ -104,7 +110,7 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
                 print('FAIL (timeout)', label, flush=True)
             finally:
                 database_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
-(output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+(output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
 print(f'{len(summary["passed"])} passed; {len(summary["failed"])} failed; '
       f'{len(summary["skipped"])} skipped tests; {len(summary["skipped_subtests"])} skipped subtests', flush=True)
 raise SystemExit(1 if summary['failed'] else 0)
