@@ -1,6 +1,7 @@
 from pathlib import Path
 import json,sys,tempfile,unittest
 from datetime import datetime,timezone,timedelta
+from io import StringIO
 from unittest.mock import patch
 import mandate
 
@@ -15,8 +16,12 @@ class Records(unittest.TestCase):
                 if command!="keygen": argv+=["--file",str(record)]
                 with patch.object(sys,"argv",argv),patch("getpass.getpass",return_value="temporary test passphrase"):
                     mandate.main()
-            run("keygen")
+            with patch("sys.stdout", new_callable=StringIO) as generated:
+                run("keygen")
             self.assertIn(b"ENCRYPTED PRIVATE KEY",private.read_bytes())
+            with patch.object(sys, "argv", ["mandate", "fingerprint", str(public)]), patch("sys.stdout", new_callable=StringIO) as inspected:
+                mandate.main()
+            self.assertEqual(inspected.getvalue(), generated.getvalue())
             now=datetime.now(timezone.utc)
             expiry=(now+timedelta(days=1)).isoformat()
             run("create","--engagement","local","--targets","localhost","--checks","web_scan","--name","Local","--email","local@example.org","--expires",expiry,
@@ -27,7 +32,15 @@ class Records(unittest.TestCase):
             approval = dict(engagement="local", key_fingerprint=saved["authorized_by"]["key_fingerprint"],
                             targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
             grant.write_text(json.dumps(approval))
-            run("verify", "--approval", str(grant))
+            with patch("sys.stdout", new_callable=StringIO) as shown:
+                run("verify", "--approval", str(grant), "--show-scope")
+            status, details = shown.getvalue().split("\n", 1)
+            self.assertIn("fits the selected approval", status)
+            fields = json.loads(details)
+            self.assertEqual(fields["scope"], saved["scope"])
+            self.assertEqual(fields["constraints"], saved["constraints"])
+            self.assertEqual(fields["valid_from"], saved["valid_from"])
+            self.assertNotIn("local@example.org", shown.getvalue())
             excludes = ["monitoring.example", "2001:0db8:0:0:0:0:0:1/128", "auth_bypass"]
             record_start = datetime.fromisoformat(saved["valid_from"])
             equivalent_start = record_start.astimezone(timezone(timedelta(hours=2))).isoformat()
@@ -40,8 +53,10 @@ class Records(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "empty approval validity window"):
                 run("verify", "--approval", str(grant))
             grant.write_text(json.dumps(approval | {"excluded": excludes + ["private.example"]}))
-            with self.assertRaisesRegex(ValueError, "required exclusion"):
-                run("verify", "--approval", str(grant))
+            with patch("sys.stdout", new_callable=StringIO) as rejected:
+                with self.assertRaisesRegex(ValueError, "required exclusion"):
+                    run("verify", "--approval", str(grant), "--show-scope")
+            self.assertEqual(rejected.getvalue(), "")
             for malformed in ("auth_bypass", [False], ["2001:db8::/064"]):
                 grant.write_text(json.dumps(approval | {"excluded": malformed}))
                 with self.assertRaises(ValueError):

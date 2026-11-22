@@ -143,6 +143,13 @@ def read_key(path):
     return read_regular_file(path, MAX_KEY_BYTES, "key file exceeds size limit")
 
 
+def read_public_key(path):
+    key = ser.load_pem_public_key(read_key(path))
+    if not isinstance(key, Ed25519PublicKey):
+        raise ValueError("expected an Ed25519 public key")
+    return key
+
+
 def signing_passphrase(prompt):
     # getpass warns before falling back to a potentially echoed stdin read.
     with warnings.catch_warnings():
@@ -242,9 +249,7 @@ def check_approval(obj, path):
 
 
 def verify(path, key_path, now=None, allow_expired=False):
-    key = ser.load_pem_public_key(read_key(key_path))
-    if not isinstance(key, Ed25519PublicKey):
-        raise ValueError("expected Ed25519 trusted key")
+    key = read_public_key(key_path)
     raw = read_regular_file(path, MAX_RECORD_BYTES, "mandate exceeds size limit")
     obj = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(obj, dict) or "signature" not in obj:
@@ -260,10 +265,13 @@ def verify(path, key_path, now=None, allow_expired=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+    inspect_key = sub.add_parser("fingerprint", help="display a candidate public key fingerprint")
+    inspect_key.add_argument("public_key", type=Path)
     for cmd in ("keygen", "create", "verify", "renew"):
         p = sub.add_parser(cmd)
         if cmd == "verify":
             p.add_argument("--approval", type=Path, help="reviewer-provisioned signer and scope grant")
+            p.add_argument("--show-scope", action="store_true", help="show the verified scope and constraints")
         if cmd != "verify":
             p.add_argument("--key", type=Path, default=KEYS / "signer.pem")
         p.add_argument("--trusted-key", type=Path, default=KEYS / "signer.pub")
@@ -278,6 +286,9 @@ def main():
             p.add_argument("--max-concurrency", type=int, default=1)
             p.add_argument("--valid-from", help="RFC3339 start time (default: now)")
     args = parser.parse_args()
+    if args.cmd == "fingerprint":
+        print(fingerprint(read_public_key(args.public_key)))
+        return
     if args.cmd == "keygen":
         if args.key.exists() or args.trusted_key.exists() or args.key.resolve() == args.trusted_key.resolve():
             raise ValueError("choose unused, distinct key paths")
@@ -293,19 +304,25 @@ def main():
         return
     if args.cmd == "verify":
         obj = verify(args.file, args.trusted_key)
+        status = "Signature valid for the selected key:"
         if args.approval is not None:
             check_approval(obj, args.approval)
-            check_window(obj)
-            print("Signed record fits the selected approval:", obj["engagement"], "until", obj["expires"])
-            return
-        print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
+            status = "Signed record fits the selected approval:"
+        details = None
+        if args.show_scope:
+            summary = {field: obj[field] for field in ("valid_from", "expires", "scope", "constraints")}
+            details = json.dumps(summary, indent=2)
+        check_window(obj)
+        print(status, obj["engagement"], "until", obj["expires"])
+        if details is not None:
+            print(details)
         return
     key = ser.load_pem_private_key(read_key(args.key), signing_passphrase("Signing passphrase: ").encode())
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("expected encrypted Ed25519 key")
     fp = fingerprint(key.public_key())
-    trusted = ser.load_pem_public_key(read_key(args.trusted_key))
-    if not isinstance(trusted, Ed25519PublicKey) or fingerprint(trusted) != fp:
+    trusted = read_public_key(args.trusted_key)
+    if fingerprint(trusted) != fp:
         raise ValueError("signing key does not match trusted key")
     if args.cmd == "renew":
         obj = verify(args.file, args.trusted_key, allow_expired=True)

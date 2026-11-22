@@ -8,6 +8,8 @@ The asset owner decides who may approve work for each asset. For a personal lab,
 
 There is no central enrollment service. The reviewer chooses the trusted public key. Before accepting records from a new signer, obtain their public key and confirm its fingerprint through a separate trusted channel. The fingerprint printed by key generation is SHA-256 over the raw Ed25519 public key, encoded in base64 without padding. Store the approved public key somewhere the engagement author cannot overwrite. Accepting a public key solely because it arrived alongside a mandate would let anyone approve their own document.
 
+Run `python mandate.py fingerprint candidate.pub` to calculate the fingerprint of a received public key. Compare it with the value from the separate trusted channel before accepting the key.
+
 ## Issue, review, and renew
 
 1. **Generate a key once.** From the [CLI directory](../tools/mandate/README.md), run `python mandate.py keygen`. The signer sets and confirms a passphrase of at least 12 characters. Keep the encrypted private key on the signing machine. Share only the public key and confirm its fingerprint.
@@ -15,6 +17,8 @@ There is no central enrollment service. The reviewer chooses the trusted public 
 3. **Verify independently.** On the reviewing machine, use the public key you approved earlier. For example, run `python mandate.py verify --file engagement.json --trusted-key approved/lab-owner.pub`. The reviewer needs no passphrase or private key. A successful check prints the engagement and expiry. A rejected document returns a nonzero exit status.
 4. **Compare the signed scope with the actual permission.** Review the asset owner's written approval, including exclusions. For a repeatable offline check, provision a grant as described below and pass it with `--approval`. Verification without that argument checks only the signed record.
 5. **Renew or replace.** The signer can use `renew` with the matching private key and passphrase to extend the expiry, including after expiration. Renewal validates the original signature and preserves the scope. Issue a new document for a changed scope. A new document does not automatically invalidate earlier copies.
+
+Add `--show-scope` to `verify` to display the signed targets, checks, exclusions, constraints, and validity window after verification succeeds. The output can include client hostnames and IP addresses. Keep it with the engagement materials.
 
 ## What a successful verification establishes
 
