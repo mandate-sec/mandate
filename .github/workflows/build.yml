@@ -31,19 +31,19 @@ jobs:
           persist-credentials: false
       - name: Test entrypoint shutdown and restart handling
         run: python3 -m unittest discover -s tests -p test_start.py -v
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
       - name: Test api-recon dependency preflight
         run: python3 -m unittest discover -s tests -p test_api_recon_runtime.py -v
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.10"
           cache: true
       - run: go vet ./...
       - name: Run every Go test with fresh PostgreSQL state
         run: python3 ci/go-tests-isolated.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: go-regression-results
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -81,7 +81,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run build:static
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.10"
           cache: true
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.10"
           cache: true
@@ -133,10 +133,10 @@ jobs:
       - name: Test verification failure handling
         run: sh tests/verify.sh
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build safe image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile.safe
@@ -160,7 +160,7 @@ jobs:
       - name: Record image digest
         run: docker image inspect failsafe-security/artex:ci --format '{{.Id}}' | tee image-id.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: image-id
           path: image-id.txt
