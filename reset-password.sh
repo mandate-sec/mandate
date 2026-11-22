@@ -141,7 +141,8 @@ SQL=$(cat <<SQL
 \\getenv newpw ARTEX_RESET_NEWPASS
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 INSERT INTO settings(key, value)
-VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
+VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST))),
+       ('auth.session_generation', encode(gen_random_bytes(32), 'hex'))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 SQL
 )
@@ -165,7 +166,7 @@ if [[ "$MODE" == "local" ]]; then
   declare -a PSQL_ARGS=()
   if [[ -n "$DSN" ]]; then
     PSQL_ARGS=("$DSN")
-    target="$DSN"
+    target="configured PostgreSQL connection (credentials hidden)"
   else
     [[ -n "$USER"   ]] || die "missing database user (-U) or a valid config.json/DSN"
     [[ -n "$DBNAME" ]] || die "missing database name (-d) or a valid config.json/DSN"

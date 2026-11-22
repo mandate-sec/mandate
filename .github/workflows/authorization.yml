@@ -5,6 +5,7 @@ on:
     paths:
       - "tools/mandate/**"
       - "config/*.go"
+      - "reset-password.sh"
       - "server/session_key*.go"
       - "server/session_owner*.go"
       - ".github/workflows/authorization.yml"
@@ -12,6 +13,7 @@ on:
     paths:
       - "tools/mandate/**"
       - "config/*.go"
+      - "reset-password.sh"
       - "server/session_key*.go"
       - "server/session_owner*.go"
       - ".github/workflows/authorization.yml"
@@ -51,3 +53,33 @@ jobs:
         run: go test -count=1 -v session_key.go session_owner_unix.go session_key_test.go session_key_unix_test.go
       - name: Verify database configuration and credential handling
         run: go test -count=1 ./config
+
+  recovery-session-revocation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+        env:
+          POSTGRES_PASSWORD: recovery-test-fixture
+        ports:
+          - 5432/tcp
+        options: --health-cmd pg_isready --health-interval 2s --health-timeout 3s --health-retries 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify recovery rotates the session generation on every reset
+        env:
+          PGHOST: localhost
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
+          PGUSER: postgres
+          PGPASSWORD: recovery-test-fixture
+          PGDATABASE: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz DEFAULT now())'
+          for pass in fixture-first fixture-second; do
+            bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -p "$pass" -y
+            generation=$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")
+            [[ "$generation" =~ ^[a-f0-9]{64}$ && "$generation" != "${previous:-}" ]]
+            previous=$generation
+          done
