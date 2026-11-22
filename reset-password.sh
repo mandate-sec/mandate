@@ -23,7 +23,9 @@
 # Security: password via env var + psql \getenv (not argv), auto-escaped with
 # :'var'; the DB password goes through PGPASSWORD, also out of argv.
 # =============================================================================
+set +ax
 set -euo pipefail
+unset NEWPASS NEWPASS2 ARTEX_RESET_NEWPASS
 
 PASS_KEY="auth.password_hash"
 BCRYPT_COST=10
@@ -150,8 +152,7 @@ if [[ -z "$NEWPASS" ]]; then
 fi
 [[ -n "$NEWPASS" ]] || die "password cannot be empty"
 
-# Pass the password to psql via an environment variable (\getenv reads it; it never enters argv/ps)
-export ARTEX_RESET_NEWPASS="$NEWPASS"
+unset NEWPASS2
 
 # Generate bcrypt in-database and upsert; the password is auto-escaped with :'newpw'. CREATE EXTENSION is idempotent;
 # if the database role lacks extension-creation privileges this fails here (see the failure branch of run below).
@@ -212,7 +213,7 @@ if [[ "$MODE" == "local" ]]; then
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
   fi
 
-  if ! printf '%s\n' "$SQL" | psql -X "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
+  if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" psql -X "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
     die "Write failed. If pgcrypto permissions/availability is reported, use a role with extension-creation privileges, or run CREATE EXTENSION pgcrypto manually first."
   fi
 
@@ -254,10 +255,10 @@ else
     exec psql -X -v ON_ERROR_STOP=1 -q
   ')
 
-  if ! printf '%s\n' "$SQL" | "${EXEC_CMD[@]}" >/dev/null; then
+  if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" "${EXEC_CMD[@]}" >/dev/null; then
     die "Write failed. Check the container name (-c), the container database settings, and that the role has pgcrypto privileges."
   fi
 fi
 
-unset ARTEX_RESET_NEWPASS
+unset NEWPASS
 echo "✓ ARTEX administrator password reset. Log in with username ARTEX and the new password (no service restart required)."
