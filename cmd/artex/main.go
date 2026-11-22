@@ -52,11 +52,23 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8787", "HTTP listen address")
+		addr    = flag.String("listen", defaultListenAddr, "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
 	)
+	flag.StringVar(addr, "addr", defaultListenAddr, "alias for --listen")
 	flag.Parse()
+	ack := os.Getenv("MANDATE_I_UNDERSTAND_THIS_IS_DANGEROUS")
+	if err := checkListener(*addr, ack); err != nil {
+		log.Printf("HTTP listener: %v", err)
+		return 2
+	}
+	if *proxy != "" {
+		if err := checkListener(*proxy, ack); err != nil {
+			log.Printf("recording proxy: %v", err)
+			return 2
+		}
+	}
 
 	// hand the build version to the server package so GET /api/health can report it
 	// to the frontend top bar.
