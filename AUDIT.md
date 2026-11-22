@@ -1,6 +1,6 @@
 # Mandate security review
 
-This record covers 27 findings addressed in the fork through commit `c37a9e4`. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
+This record covers 28 findings addressed in the fork through commit `7be31ea`. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
 
 ## Authorization and recovery limits
 
@@ -41,3 +41,4 @@ This record covers 27 findings addressed in the fork through commit `c37a9e4`. N
 | 25 | An invalid model-list proxy URL could silently send the request directly | [443b62b](https://github.com/mandate-sec/mandate/commit/443b62ba23dc95681883228fd208222d9a1a8c02) |
 | 26 | An invalid offline mandate could inject control characters into terminal diagnostics | [8345215](https://github.com/mandate-sec/mandate/commit/834521518fcb2c1b23261dc269188a8ea1ebca5c) |
 | 27 | Signing prompts could fall back to visibly echoed passphrase input | [c37a9e4](https://github.com/mandate-sec/mandate/commit/c37a9e4e8370f34eeddbcaa696cd6af795e3dbc7) |
+| 28 | An offline reviewer grant could be reused for a differently named engagement with matching signer and scope | [7be31ea](https://github.com/mandate-sec/mandate/commit/7be31ead88f8c3d3fd4be03e659dc8843dccc0f1) |
