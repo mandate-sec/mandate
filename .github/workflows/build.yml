@@ -33,6 +33,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_start.py -v
       - name: Test offline evidence and signature verification
         run: python3 -m unittest discover -s tests -p test_verify_evidence.py -v
+      - name: Test administrator session revocation
+        run: python3 -m unittest discover -s tests -p test_revoke_sessions.py -v
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"

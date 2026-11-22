@@ -20,6 +20,7 @@
 #   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -d artex
 #   ./reset-password.sh -m docker                # docker (uses the running database container settings)
 #   ./reset-password.sh -m docker -c pg --exec docker
+#   ./reset-password.sh -m docker --revoke-sessions  # revoke sessions only
 # For automation, --password-stdin reads one line and preserves spaces.
 # The legacy -p and -W flags expose their values in process arguments.
 # =============================================================================
@@ -38,6 +39,8 @@ CONTAINER=""       # postgres service/container name in docker mode (default: po
 EXEC_KIND=""       # compose | docker (which exec to use in docker mode; empty = auto)
 NEWPASS=""
 PASSWORD_STDIN=0
+PASSWORD_ARG=0
+REVOKE_SESSIONS=0
 ASSUME_YES=0
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -60,12 +63,17 @@ while [[ $# -gt 0 ]]; do
     -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
     --exec)           EXEC_KIND="${2:-}"; [[ "$EXEC_KIND" == compose || "$EXEC_KIND" == docker ]] || die "--exec requires compose or docker"; shift 2 ;;
     --password-stdin) PASSWORD_STDIN=1; shift ;;
-    -p|--new-password) NEWPASS="${2:-}"; shift 2 ;;
+    --revoke-sessions) REVOKE_SESSIONS=1; shift ;;
+    -p|--new-password) NEWPASS="${2:-}"; PASSWORD_ARG=1; shift 2 ;;
     -y|--yes)         ASSUME_YES=1; shift ;;
     -h|--help)        usage ;;
     *) die "unknown argument: $1 (use -h for usage)" ;;
   esac
 done
+
+if [[ "$REVOKE_SESSIONS" == 1 && ( "$PASSWORD_STDIN" == 1 || "$PASSWORD_ARG" == 1 ) ]]; then
+  die "--revoke-sessions cannot be combined with new password inputs"
+fi
 
 # ---- Read database.* from config.json (local mode only, when no connection is given explicitly) -----
 read_config_json() {
@@ -157,23 +165,39 @@ if [[ "$MODE" == local && -n "$EXEC_KIND$CONTAINER" ]]; then
 fi
 info "Deployment mode: $MODE"
 
-# ---- Collect the new password ----------------------------------------------
-if [[ "$PASSWORD_STDIN" == 1 ]]; then
-  [[ -z "$NEWPASS" ]] || die "choose one new password input"
-  IFS= read -r -s NEWPASS || [[ -n "$NEWPASS" ]] || die "missing password on standard input"
-elif [[ -z "$NEWPASS" ]]; then
-  IFS= read -r -s -p "Enter new password (username is always ARTEX): " NEWPASS; echo >&2
+# ---- Prepare the selected recovery action ----------------------------------
+if [[ "$REVOKE_SESSIONS" == 1 ]]; then
+  ACTION="Revoke all Mandate console sessions"
+  SQL=$(cat <<'SQL'
+\set ON_ERROR_STOP on
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM settings WHERE key = 'auth.password_hash' AND value <> '') THEN
+    RAISE EXCEPTION 'Administrator setup is incomplete';
+  END IF;
+  INSERT INTO settings(key, value)
+  VALUES ('auth.session_generation', gen_random_uuid()::text)
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+END
+$$;
+SQL
+)
+else
+  ACTION="Reset the Mandate administrator password"
+  if [[ "$PASSWORD_STDIN" == 1 ]]; then
+    [[ -z "$NEWPASS" ]] || die "choose one new password input"
+    IFS= read -r -s NEWPASS || [[ -n "$NEWPASS" ]] || die "missing password on standard input"
+  elif [[ -z "$NEWPASS" ]]; then
+    IFS= read -r -s -p "Enter new password (username is always ARTEX): " NEWPASS; echo >&2
+    [[ -n "$NEWPASS" ]] || die "password cannot be empty"
+    IFS= read -r -s -p "Enter again to confirm: " NEWPASS2; echo >&2
+    [[ "$NEWPASS" == "$NEWPASS2" ]] || die "the two entries do not match"
+  fi
   [[ -n "$NEWPASS" ]] || die "password cannot be empty"
-  IFS= read -r -s -p "Enter again to confirm: " NEWPASS2; echo >&2
-  [[ "$NEWPASS" == "$NEWPASS2" ]] || die "the two entries do not match"
-fi
-[[ -n "$NEWPASS" ]] || die "password cannot be empty"
+  unset NEWPASS2
 
-unset NEWPASS2
-
-# Generate bcrypt in-database and upsert; the password is auto-escaped with :'newpw'. CREATE EXTENSION is idempotent;
-# if the database role lacks extension-creation privileges this fails here (see the failure branch of run below).
-SQL=$(cat <<SQL
+  # psql quotes the password value. The database role needs access to pgcrypto.
+  SQL=$(cat <<SQL
 \\set ON_ERROR_STOP on
 \\getenv newpw ARTEX_RESET_NEWPASS
 SELECT char_length(:'newpw') >= 8 AND octet_length(convert_to(:'newpw', 'UTF8')) <= 72 AS password_valid
@@ -188,7 +212,8 @@ VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST))),
        ('auth.session_generation', encode(gen_random_bytes(32), 'hex'))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 SQL
-)
+  )
+fi
 
 # ---- Execute ---------------------------------------------------------------
 if [[ "$MODE" == "local" ]]; then
@@ -229,11 +254,14 @@ if [[ "$MODE" == "local" ]]; then
 
   info "Target database: $target"
   if [[ "$ASSUME_YES" -ne 1 ]]; then
-    read -r -p "Reset the ARTEX password in this database? [y/N] " ans
+    read -r -p "$ACTION in this database? [y/N] " ans
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
   fi
 
   if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" psql -X "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
+    if [[ "$REVOKE_SESSIONS" == 1 ]]; then
+      die "Session revocation failed. Check the database target and administrator setup."
+    fi
     die "Write failed. If pgcrypto permissions/availability is reported, use a role with extension-creation privileges, or run CREATE EXTENSION pgcrypto manually first."
   fi
 
@@ -258,7 +286,7 @@ else
 
   info "Target: database ${PGDATABASE:-from container settings} in $CONTAINER (exec=$EXEC_KIND)"
   if [[ "$ASSUME_YES" -ne 1 ]]; then
-    read -r -p "Reset the ARTEX password in this container's database? [y/N] " ans
+    read -r -p "$ACTION in this container's database? [y/N] " ans
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
   fi
 
@@ -276,9 +304,16 @@ else
   ')
 
   if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" "${EXEC_CMD[@]}" >/dev/null; then
+    if [[ "$REVOKE_SESSIONS" == 1 ]]; then
+      die "Session revocation failed. Check the container database target and administrator setup."
+    fi
     die "Write failed. Check the container name (-c), the container database settings, and that the role has pgcrypto privileges."
   fi
 fi
 
 unset NEWPASS
+if [[ "$REVOKE_SESSIONS" == 1 ]]; then
+  echo "All Mandate console sessions revoked. Sign in again with the existing administrator password."
+  exit 0
+fi
 echo "✓ ARTEX administrator password reset. Log in with username ARTEX and the new password (no service restart required)."
