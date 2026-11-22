@@ -39,9 +39,10 @@ var BuildVersion = "dev"
 // Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	m      *Manager
-	engine *Engine
-	ctx    context.Context
+	passwordAttempts passwordLimiter
+	m                *Manager
+	engine           *Engine
+	ctx              context.Context
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key stored outside the browsable workspace

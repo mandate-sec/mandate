@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
@@ -20,6 +22,16 @@ const (
 	minPasswordRunes = 8
 	maxPasswordBytes = 72
 )
+
+func (s *Server) beginPasswordCheck(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	done, retry := s.passwordAttempts.begin(r.RemoteAddr, time.Now())
+	if done == nil {
+		w.Header().Set("Retry-After", strconv.Itoa(int((retry+time.Second-1)/time.Second)))
+		writeErr(w, http.StatusTooManyRequests, "Too many password attempts. Try again later.")
+		return nil, false
+	}
+	return done, true
+}
 
 // errDataSourceUnavailable 是密码相关读操作失败时统一的回复。这些 handler 绝不能
 // 把"读不到"当成"没有设置"：authInit 曾因此在数据库报错时放行，让未认证请求覆盖
@@ -172,6 +184,11 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, msg)
 		return
 	}
+	done, allowed := s.beginPasswordCheck(w, r)
+	if !allowed {
+		return
+	}
+	defer done()
 	hash, generation, err := pg.AdminCredentials()
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
@@ -225,6 +242,11 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}
+	done, allowed := s.beginPasswordCheck(w, r)
+	if !allowed {
+		return
+	}
+	defer done()
 	hash, generation, err := pg.AdminCredentials()
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)

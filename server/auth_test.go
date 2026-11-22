@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 func signTestSession(s *Server) (string, error) {
@@ -13,6 +16,24 @@ func signTestSession(s *Server) (string, error) {
 		return "", err
 	}
 	return signJWT(sessionSigningKey(s.jwtKey, generation))
+}
+
+func TestThrottledLoginReturnsRetryAfterBeforeQuery(t *testing.T) {
+	s := &Server{m: &Manager{pg: &db.DB{}}}
+	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"ARTEX","password":"fixture"}`))
+	for range passwordBurst {
+		done, _ := s.passwordAttempts.begin(req.RemoteAddr, time.Now())
+		if done == nil {
+			t.Fatal("failed to seed test budget")
+		}
+		done()
+	}
+	req.Header.Set("X-Forwarded-For", "192.0.2.7")
+	w := httptest.NewRecorder()
+	s.authLogin(w, req)
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("status %d, Retry-After %q", w.Code, w.Header().Get("Retry-After"))
+	}
 }
 
 // GetSetting 对"键不存在"和"读取出错"的返回值只差一个 error：两种情况 value 都是
