@@ -439,7 +439,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	if m.traffic != nil {
 		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
-			log.Printf("[proxy] 全局代理 %q 无效，已忽略: %v", m.globalProxy, err)
+			log.Printf("[proxy] 全局代理无效，已忽略: %v", err)
 		}
 	}
 	m.enrich = enrich.New(m.assets, m.ProxyAddr, 4)

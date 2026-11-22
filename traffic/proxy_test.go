@@ -1,6 +1,23 @@
 package traffic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestProxyValidationKeepsCredentialsOutOfErrors(t *testing.T) {
+	for _, raw := range []string{
+		"http://private-marker:%zz@proxy.invalid",
+		"private-marker://proxy.invalid",
+		"//private-marker@proxy.invalid",
+		"http://private-marker@:8080",
+	} {
+		_, err := ValidateProxyURL(raw)
+		if err == nil || strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("expected a validation error without submitted URL fragments")
+		}
+	}
+}
 
 func TestValidateProxyURL(t *testing.T) {
 	ok := []string{
