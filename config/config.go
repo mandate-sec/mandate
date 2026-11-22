@@ -146,7 +146,7 @@ func SkillDir() string {
 
 // PostgresDSN resolves the connection string with precedence:
 //
-//	env ARTEX_PG_DSN  >  config file (database.dsn, or assembled from fields)
+//	env ARTEX_PG_DSN  >  MANDATE_POSTGRES_HOST and POSTGRES_* fields  >  config file (database.dsn, or assembled from fields)
 //
 // There is NO built-in fallback: when neither source supplies a database config,
 // it returns an error naming the config path it inspected, so startup fails loudly
@@ -155,6 +155,18 @@ func SkillDir() string {
 func PostgresDSN() (dsn, source string, err error) {
 	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
 		return v, "环境变量 ARTEX_PG_DSN", nil
+	}
+	if host := os.Getenv("MANDATE_POSTGRES_HOST"); host != "" {
+		db := Database{
+			Host:     host,
+			User:     os.Getenv("POSTGRES_USER"),
+			Password: os.Getenv("POSTGRES_PASSWORD"),
+			DBName:   os.Getenv("POSTGRES_DB"),
+		}
+		if db.User == "" || db.Password == "" || db.DBName == "" {
+			return "", "", fmt.Errorf("incomplete database environment")
+		}
+		return db.buildDSN(), "database environment", nil
 	}
 	path := Path()
 	cfg, err := loadFile(path)

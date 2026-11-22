@@ -88,3 +88,28 @@ func TestPostgresDSNPrecedence(t *testing.T) {
 		t.Fatalf("file dsn verbatim, got %q err %v", got, err)
 	}
 }
+
+func TestComposeDatabaseCredentialsRoundTrip(t *testing.T) {
+	t.Setenv("ARTEX_PG_DSN", "")
+	t.Setenv("MANDATE_POSTGRES_HOST", "postgres")
+	t.Setenv("POSTGRES_USER", "test@user")
+	t.Setenv("POSTGRES_DB", "test#db")
+	password := "fixture @:/?#[]%+"
+	t.Setenv("POSTGRES_PASSWORD", password)
+	dsn, _, err := PostgresDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal("invalid database URL")
+	}
+	got, ok := u.User.Password()
+	if !ok || got != password || u.User.Username() != "test@user" || u.Host != "postgres:5432" || u.Path != "/test#db" {
+		t.Fatal("database fields changed in transit")
+	}
+	t.Setenv("POSTGRES_PASSWORD", "")
+	if _, _, err := PostgresDSN(); err == nil {
+		t.Fatal("empty Compose password accepted")
+	}
+}

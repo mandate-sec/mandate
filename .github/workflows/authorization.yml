@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - "tools/mandate/**"
+      - "config/*.go"
       - "server/session_key*.go"
       - "server/session_owner*.go"
       - ".github/workflows/authorization.yml"
   pull_request:
     paths:
       - "tools/mandate/**"
+      - "config/*.go"
       - "server/session_key*.go"
       - "server/session_owner*.go"
       - ".github/workflows/authorization.yml"
@@ -47,3 +49,5 @@ jobs:
       - name: Verify session key identity and file modes
         working-directory: server
         run: go test -count=1 -v session_key.go session_owner_unix.go session_key_test.go session_key_unix_test.go
+      - name: Verify database configuration and credential handling
+        run: go test -count=1 ./config
