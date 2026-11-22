@@ -110,8 +110,17 @@ def fingerprint(key):
 
 
 def write_new(path, data):
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
-        f.write(data)
+    with tempfile.TemporaryDirectory(dir=path.parent) as staging:
+        staged = Path(staging) / "pending"
+        with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600), "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        # Windows rename refuses existing destinations. POSIX rename replaces them.
+        if os.name == "nt":
+            os.rename(staged, path)
+        else:
+            os.link(staged, path)
 
 
 def read_regular_file(path, limit, size_error):
@@ -149,7 +158,7 @@ def rejection_message(exc):
     detail = str(exc) or type(exc).__name__
     excerpt = detail[:240]
     safe = "".join(ch if ch.isprintable() else ascii(ch)[1:-1] for ch in excerpt)
-    return "Mandate rejected: " + safe + ("â€¦" if len(detail) > len(excerpt) else "")
+    return "Mandate rejected: " + safe + ("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" if len(detail) > len(excerpt) else "")
 
 
 def signed(obj, key):

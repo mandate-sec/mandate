@@ -20,6 +20,19 @@ class ValidationTests(unittest.TestCase):
         for value in ("0.0.0.0/0", "192.0.2.0/24", "2001:db8::1/128"):
             mandate.target(value)
 
+    def test_new_file_is_published_only_after_a_successful_write(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "record"
+            with patch.object(os, "fsync", side_effect=OSError("flush failed")):
+                with self.assertRaisesRegex(OSError, "flush failed"):
+                    mandate.write_new(destination, b"first")
+            self.assertEqual(list(Path(folder).iterdir()), [])
+            mandate.write_new(destination, b"second")
+            with self.assertRaises(FileExistsError):
+                mandate.write_new(destination, b"third")
+            self.assertEqual(destination.read_bytes(), b"second")
+            self.assertEqual(list(Path(folder).iterdir()), [destination])
+
     def test_device_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "regular file"):
             mandate.read_key(Path(os.devnull))

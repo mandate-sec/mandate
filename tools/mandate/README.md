@@ -13,6 +13,8 @@ python mandate.py verify
 python mandate.py renew --expires 2026-12-12
 ```
 
+On Unix, key generation and record creation require a destination filesystem that supports hard links. Each file appears at its final path after its contents have been flushed to disk. Existing files are preserved.
+
 The default signing key is encrypted under a passphrase in ~/.mandate/keys/signer.pem. Verification uses signer.pub from the same directory. For independent verification, provision a trusted public key separately and pass its path with --trusted-key. Keep that file outside the writer's control. Signing and renewal require the encrypted private key. Never commit private keys or engagement files.
 
 An expiry date without a time means midnight UTC at the beginning of that date. Timestamps may include an explicit offset. Signatures cover UTF-8 JSON with sorted keys at every level, compact separators, no ASCII escaping and the signature field omitted. Duplicate fields are rejected. The signed schema permits only an integer for concurrency and no floating-point fields.
