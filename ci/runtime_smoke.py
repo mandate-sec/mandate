@@ -60,6 +60,8 @@ try:
     else:
         raise RuntimeError('PostgreSQL did not become ready')
     docker('run', '-d', '--name', app, '--network', name,
+           '--read-only', '--tmpfs', '/tmp:size=1g,mode=1777',
+           '--tmpfs', '/home/mandate:size=256m,uid=10001,gid=10001,mode=0700',
            '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--shm-size=1g',
            '-e', 'MANDATE_SETUP_TOKEN_SHA256=' + hashlib.sha256(setup_token.encode()).hexdigest(),
            '-e', f'ARTEX_PG_DSN=postgres://artex:smoke-db-fixture@{pg}:5432/artex?sslmode=disable',
@@ -85,6 +87,7 @@ try:
     expect(api('/api/update/rollback', 'POST', {}, token), 403)
     print(docker('exec', app, 'node', '/ci/api-recon-smoke.js').stdout.strip())
     print(docker('exec', app, 'node', '/ci/browser-mcp-smoke.cjs').stdout.strip())
+    assert docker('inspect', '--format', '{{.HostConfig.ReadonlyRootfs}}', app).stdout.strip() == 'true'
     assert docker('exec', app, 'id', '-u').stdout.strip() == '10001'
     assert docker('exec', app, 'test', '-w', '/app/artex', check=False).returncode == 1
     stopped = time.monotonic()

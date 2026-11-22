@@ -133,6 +133,8 @@ runs on infrastructure you control.
 
 The app runs as UID and GID 10001. Existing installations should stop the app, back up the volumes, and transfer ownership of the dedicated app data and session-key files to that account before upgrading. Keep the key directory mode 0700 and its signing key mode 0600. PostgreSQL manages its own volume separately. New app volumes inherit the image directory ownership.
 
+Compose mounts the application root filesystem read-only. Workspace data and session keys persist in their named volumes. Temporary files, browser profiles, and caches under `/tmp` or `/home/mandate` are discarded when the container stops.
+
 Chromium still uses `--no-sandbox` for container compatibility. Use an isolated host for untrusted pages.
 
 ## Managed ARTEX runs

@@ -51,6 +51,7 @@ services:
       # - ./skills:/app/skills:ro
     restart: unless-stopped
     stop_grace_period: 30s
+    read_only: true
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -58,6 +59,7 @@ services:
     shm_size: "1gb"
     tmpfs:
       - /tmp:size=1g,mode=1777
+      - /home/mandate:size=256m,uid=10001,gid=10001,mode=0700
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8787/api/health || exit 1"]
       interval: 30s
