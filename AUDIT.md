@@ -12,6 +12,14 @@ The table below records the security findings addressed in the fork. Numbers are
 
 ## Findings and fixes
 
+### Finding 17 severity estimate
+
+**Provisional CVSS v3.1 Base score: 8.6 (High).** This scenario assumes an attacker controls an already-configured MCP endpoint, needs no Mandate account, and receives a credential during ordinary use without further operator interaction. Changed scope and high confidentiality impact assume the credential grants substantial read access to a separate service under a different security authority. Integrity and availability impact are scored as none. [8.6 vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N](https://www.first.org/cvss/calculator/3.1#CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N)
+
+If the attacker must first use a low-privileged Mandate account to configure the endpoint, the same impact assumptions give **7.7 (High)**. The actual permission required to configure the endpoint and the leaked credential’s authority need verification for a specific deployment. A different hostname alone does not establish changed scope. [7.7 vector: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N](https://www.first.org/cvss/calculator/3.1#CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N)
+
+### Finding register
+
 | # | Affected behavior | Fix commits |
 |---|---|---|
 | 1 | First administrator setup could be claimed without installation-owner proof | [c6bcfae](https://github.com/mandate-sec/mandate/commit/c6bcfae0b0c728eb6597c310d66b716deb3cda87) |
