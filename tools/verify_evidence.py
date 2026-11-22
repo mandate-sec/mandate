@@ -3,13 +3,17 @@
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
 import json
+import os
+from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 import zipfile
 import zlib
@@ -22,6 +26,7 @@ CHUNK_SIZE = 1024 * 1024
 MANIFEST_LIMIT = 32 * CHUNK_SIZE
 DEFAULT_UNCOMPRESSED_LIMIT = 8 * 1024 * CHUNK_SIZE
 SIGNATURE_NAMESPACE = "mandate-evidence"
+SIGNATURE_INPUT_LIMIT = CHUNK_SIZE
 # Match the fields Mandate masks at capture time. Older exports can still contain them.
 SENSITIVE_HEADERS = frozenset({
     "authorization", "cookie", "set-cookie", "x-api-key", "proxy-authorization",
@@ -175,6 +180,41 @@ def verify_archive(file, preview=None, max_uncompressed=DEFAULT_UNCOMPRESSED_LIM
         return len(bindings)
 
 
+@contextmanager
+def open_regular_file(path):
+    # Open nonblocking on POSIX so a FIFO with no writer can be rejected.
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("expected a regular input file")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            yield stream
+    finally:
+        os.close(descriptor)
+
+
+def verify_detached_signature(archive, signature, allowed_signers, signer):
+    # Pass private, bounded snapshots to OpenSSH. The original paths could
+    # change after inspection and before the child opens them.
+    with tempfile.TemporaryDirectory(prefix="mandate-verify-") as directory:
+        root = Path(directory)
+        for path, name in ((signature, "signature"), (allowed_signers, "allowed_signers")):
+            with open_regular_file(path) as stream:
+                data = stream.read(SIGNATURE_INPUT_LIMIT + 1)
+            if len(data) > SIGNATURE_INPUT_LIMIT:
+                raise ValueError(f"{name} exceeds 1 MiB")
+            (root / name).write_bytes(data)
+        result = subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", str(root / "allowed_signers"),
+             "-I", signer, "-n", SIGNATURE_NAMESPACE, "-s", str(root / "signature")],
+            stdin=archive, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if result.returncode:
+            raise ValueError("signature verification failed")
+        archive.seek(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", help="findings ZIP exported by Mandate")
@@ -193,16 +233,9 @@ def main():
 
     preview = SharingPreview() if args.sharing_preview else None
     try:
-        with open(args.archive, "rb") as file:
+        with open_regular_file(args.archive) as file:
             if verify_signature:
-                result = subprocess.run(
-                    ["ssh-keygen", "-Y", "verify", "-f", args.allowed_signers,
-                     "-I", args.signer, "-n", SIGNATURE_NAMESPACE, "-s", args.signature],
-                    stdin=file, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-                if result.returncode:
-                    raise ValueError("signature verification failed")
-                file.seek(0)
+                verify_detached_signature(file, args.signature, args.allowed_signers, args.signer)
             count = verify_archive(file, preview, args.max_uncompressed_bytes)
     except (EOFError, OSError, RuntimeError, ValueError, zipfile.BadZipFile, zlib.error) as error:
         print(f"Verification failed: {str(error)!r}", file=sys.stderr)

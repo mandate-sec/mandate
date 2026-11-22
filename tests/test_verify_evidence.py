@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import stat
@@ -90,6 +91,29 @@ class VerifyEvidenceTests(unittest.TestCase):
         regular.compress_type = zipfile.ZIP_BZIP2
         with self.assertRaisesRegex(ValueError, "unsupported ZIP compression"):
             verify_evidence.verify_archive(make_zip([(regular, "report")]))
+
+    def test_rejects_device_input(self):
+        with self.assertRaisesRegex(ValueError, "regular input file"):
+            with verify_evidence.open_regular_file(os.devnull):
+                self.fail("device was opened as an archive")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires a POSIX FIFO")
+    def test_rejects_fifo_before_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "archive.zip"
+            os.mkfifo(fifo)
+            result = subprocess.run([sys.executable, verify_evidence.__file__, str(fifo)],
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("expected a regular input file", result.stderr)
+
+    def test_rejects_oversized_signature_before_invoking_openssh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signature = Path(directory) / "bundle.sig"
+            signature.write_bytes(b"x" * (verify_evidence.SIGNATURE_INPUT_LIMIT + 1))
+            with mock.patch.object(subprocess, "run", side_effect=AssertionError("invoked OpenSSH")):
+                with self.assertRaisesRegex(ValueError, "signature exceeds 1 MiB"):
+                    verify_evidence.verify_detached_signature(io.BytesIO(), signature, signature, "reviewer")
 
     def test_sharing_preview_shows_counts_without_exposing_values(self):
         entries = fixture_entries()
