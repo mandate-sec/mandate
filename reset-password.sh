@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
     -W|--db-password) DBPASS="${2:-}"; shift 2 ;;
     -d|--dbname)      DBNAME="${2:-}"; shift 2 ;;
     --sslmode)        SSLMODE="${2:-}"; shift 2 ;;
-    --config)         CONFIG="${2:-}"; shift 2 ;;
+    --config)         CONFIG="${2:-}"; [[ -n "$CONFIG" ]] || die "--config requires a path"; shift 2 ;;
     -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
     --exec)           EXEC_KIND="${2:-}"; [[ "$EXEC_KIND" == compose || "$EXEC_KIND" == docker ]] || die "--exec requires compose or docker"; shift 2 ;;
     --password-stdin) PASSWORD_STDIN=1; shift ;;
@@ -135,10 +135,13 @@ if [[ -f docker-compose.safe.yml ]]; then
 fi
 
 # ---- Auto-detect mode ------------------------------------------------------
+if [[ -n "$CONFIG" && -n "$DSN$HOST$USER$DBNAME" ]]; then
+  die "--config conflicts with explicit database connection options"
+fi
 if [[ -z "$MODE" ]]; then
   if [[ -n "$EXEC_KIND$CONTAINER" ]]; then
     MODE="docker"
-  elif [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
+  elif [[ -n "$DSN$HOST$USER$DBNAME$CONFIG" || -n "${ARTEX_PG_DSN:-}${ARTEX_CONFIG:-}" || -f config.json ]]; then
     MODE="local"
   elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.safe.yml || -f docker-compose.yml ]]; then
     MODE="docker"
@@ -190,11 +193,14 @@ SQL
 # ---- Execute ---------------------------------------------------------------
 if [[ "$MODE" == "local" ]]; then
   # Connection priority: command line > --dsn/$ARTEX_PG_DSN > config.json
-  if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
+  if [[ -z "$CONFIG$DSN$HOST$USER$DBNAME" ]]; then
     [[ -n "${ARTEX_PG_DSN:-}" ]] && DSN="$ARTEX_PG_DSN"
   fi
   if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
-    cfg="${CONFIG:-config.json}"
+    cfg="${CONFIG:-${ARTEX_CONFIG:-config.json}}"
+    if [[ -n "$CONFIG${ARTEX_CONFIG:-}" && ! -f "$cfg" ]]; then
+      die "selected database configuration must be an existing regular file"
+    fi
     if [[ -f "$cfg" ]]; then
       info "Reading database configuration from $cfg"
       command -v python3 >/dev/null 2>&1 || die "reading config.json requires Python 3"
