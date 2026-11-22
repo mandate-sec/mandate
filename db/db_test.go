@@ -4,11 +4,29 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestMalformedDSNErrorsDoNotExposeCredentials(t *testing.T) {
+	for _, dsn := range []string{
+		"postgres://user:private-marker%zz@localhost/db",
+		"postgres://localhost:bad/db?password=private-marker",
+		"password='private-marker",
+	} {
+		d, err := Open(dsn)
+		if d != nil {
+			d.Close()
+			t.Fatal("unexpected successful connection")
+		}
+		if err == nil || strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("expected a credential-free configuration error")
+		}
+	}
+}
 
 type schemaExecFunc func(context.Context, string, ...any) (sql.Result, error)
 

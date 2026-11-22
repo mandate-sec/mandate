@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/config"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx database/sql driver ("pgx")
 )
@@ -104,6 +105,9 @@ func ensureDatabase(dsn string) error {
 	if err != nil {
 		return nil // unparseable DSN — let the normal Open fail with a clear error
 	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return nil // keyword DSNs are handled by the driver
+	}
 	dbName := strings.TrimPrefix(u.Path, "/")
 	if dbName == "" || dbName == "postgres" {
 		return nil
@@ -119,11 +123,20 @@ func ensureDatabase(dsn string) error {
 	if err := admin.Ping(); err != nil {
 		return nil
 	}
+	if strings.ContainsRune(dbName, 0) {
+		return errors.New("invalid database name")
+	}
 	var exists bool
-	_ = admin.QueryRow(`SELECT true FROM pg_database WHERE datname=$1`, dbName).Scan(&exists)
+	if err := admin.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, dbName).Scan(&exists); err != nil {
+		return errors.New("could not check database existence")
+	}
 	if !exists {
-		if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
-			return fmt.Errorf("create database %q: %w", dbName, err)
+		if _, err := admin.Exec("CREATE DATABASE " + pgx.Identifier{dbName}.Sanitize()); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "42P04" {
+				return nil // another process created the same database
+			}
+			return errors.New("could not create configured PostgreSQL database")
 		}
 	}
 	return nil
@@ -136,7 +149,7 @@ func Open(dsn string) (*DB, error) {
 	}
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("invalid PostgreSQL connection settings")
 	}
 	// database/sql 默认不限制连接数：池里没有空闲连接时会无条件新建，一路顶到
 	// PostgreSQL 的 max_connections（默认 100）才被拒，于是高峰期的查询拿到的是
@@ -150,7 +163,7 @@ func Open(dsn string) (*DB, error) {
 	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
-		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
+		return nil, errors.New("could not connect to PostgreSQL; check connection settings and service availability")
 	}
 	d := &DB{sqlDB}
 	// pgx runs multi-statement Exec via the simple protocol when there are no args.
