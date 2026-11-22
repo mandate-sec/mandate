@@ -158,7 +158,7 @@ def rejection_message(exc):
     detail = str(exc) or type(exc).__name__
     excerpt = detail[:240]
     safe = "".join(ch if ch.isprintable() else ascii(ch)[1:-1] for ch in excerpt)
-    return "Mandate rejected: " + safe + ("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" if len(detail) > len(excerpt) else "")
+    return "Mandate rejected: " + safe + ("…" if len(detail) > len(excerpt) else "")
 
 
 def signed(obj, key):

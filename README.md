@@ -49,11 +49,11 @@ The console file manager and chat upload handler use filesystem operations roote
 ## Upstream documentation
 
 <p align="center">
-  <img src="assets/artex-failsafe-header.png" alt="ARTEX â€” a source-built FailSafe distribution" width="100%">
+  <img src="assets/artex-failsafe-header.png" alt="ARTEX — a source-built FailSafe distribution" width="100%">
 </p>
 
 A source-built, locally bound distribution of [ARTEX](https://github.com/RuoJi6/ARTEX),
-an open-source multi-agent security testing harness â€” with an English interface,
+an open-source multi-agent security testing harness — with an English interface,
 a hardened supply chain, and deployment controls.
 
 This repository exists because the prebuilt `tomicdd/artex` Docker image was
@@ -75,7 +75,7 @@ Follow the [Mandate security policy](SECURITY.md) to contact this fork's maintai
 
 ARTEX is an agentic harness: the model plans, calls tools, and reasons about
 targets across many turns. For authorized security work we recommend a
-**cyber-specialized model** â€” one trained or fine-tuned for security tasks
+**cyber-specialized model** — one trained or fine-tuned for security tasks
 (cyber-domain SFT) with minimal refusal behavior, rather than a general-purpose
 chat model. General consumer models routinely refuse reconnaissance, payload
 construction, or exploitation reasoning even when the engagement is authorized,
@@ -109,7 +109,7 @@ runs on infrastructure you control.
   project documentation are in English for international teams.
 - **Fast static delivery.** The embedded web console is served with Brotli/gzip
   compression, content-hash ETags, and immutable caching, so the UI stays
-  responsive when the binary is reached directly on `:8787` â€” no reverse proxy
+  responsive when the binary is reached directly on `:8787` — no reverse proxy
   required for acceptable load times.
 
 ## What is different from upstream
