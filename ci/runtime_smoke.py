@@ -90,6 +90,13 @@ try:
     print(docker('exec', app, 'node', '/ci/browser-mcp-smoke.cjs').stdout.strip())
     assert docker('inspect', '--format', '{{.HostConfig.ReadonlyRootfs}}', app).stdout.strip() == 'true'
     assert docker('exec', app, 'id', '-u').stdout.strip() == '10001'
+    status_lines = docker('exec', app, 'cat', '/proc/1/status').stdout.splitlines()
+    status = dict(line.split(':', 1) for line in status_lines if ':' in line)
+    for field in ('CapEff', 'CapPrm', 'CapBnd', 'CapAmb'):
+        assert int(status[field], 16) == 0, field
+    assert status['NoNewPrivs'].strip() == '1'
+    temporary_markers = ('/tmp/mandate-restart-check', '/home/mandate/mandate-restart-check')
+    docker('exec', app, 'touch', *temporary_markers)
     assert docker('exec', app, 'test', '-w', '/app/artex', check=False).returncode == 1
     stopped = time.monotonic()
     docker('stop', '--time', '15', app)
@@ -103,6 +110,8 @@ try:
         time.sleep(1)
     else:
         raise RuntimeError('ARTEX did not become healthy after restart')
+    for marker in temporary_markers:
+        docker('exec', app, 'test', '!', '-e', marker)
     expect(api('/api/tasks', token=token), 200)
     print('Runtime smoke: embedded UI, PostgreSQL, auth, updater, browsers, unprivileged runtime, shutdown and persisted JWT passed')
     new_password = secrets.token_urlsafe(24)
