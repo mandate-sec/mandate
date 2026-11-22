@@ -11,10 +11,10 @@ web/.next
 server/webui/dist
 dist
 *.log
-.env
-.env.safe
-.env.safe.local
-.env.safe.example
+**/.env
+**/.env.*
+**/.npmrc
+!skills/api-recon/scripts/.npmrc
 artex
 # Local engagement records and private signing keys
 **/mandate.json

@@ -1,6 +1,9 @@
 .env
-.env.safe
-.env.safe.local
+.env.*
+!.env.example
+!.env.safe.example
+.npmrc
+!skills/api-recon/scripts/.npmrc
 data/
 quarantine/
 dist/
