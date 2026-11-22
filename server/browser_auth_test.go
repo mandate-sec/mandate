@@ -21,6 +21,19 @@ func TestBrowserCredentialTransport(t *testing.T) {
 	if extractToken(r) != "header" {
 		t.Fatal("explicit bearer credential should take precedence")
 	}
+	for _, tc := range []struct{ header, want string }{
+		{"bearer   explicit", "explicit"}, {"Basic explicit", ""}, {"Bearer", ""}, {"", ""},
+	} {
+		r.Header.Set("Authorization", tc.header)
+		if got := extractToken(r); got != tc.want {
+			t.Fatalf("Authorization %q: got %q, want %q", tc.header, got, tc.want)
+		}
+	}
+	r.Header.Set("Authorization", "Bearer first")
+	r.Header.Add("Authorization", "Bearer second")
+	if extractToken(r) != "" {
+		t.Fatal("accepted ambiguous credentials")
+	}
 }
 
 func TestBrowserOriginPolicy(t *testing.T) {

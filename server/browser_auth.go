@@ -9,8 +9,17 @@ import (
 
 // Credentials in URLs are easily retained in access logs and browser history.
 func extractToken(r *http.Request) string {
-	if header, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		return header
+	if headers := r.Header.Values("Authorization"); len(headers) > 0 {
+		// An explicit credential must stand on its own, even if the browser
+		// also attached an administrator's session cookie.
+		if len(headers) != 1 {
+			return ""
+		}
+		scheme, credential, ok := strings.Cut(headers[0], " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") {
+			return ""
+		}
+		return strings.TrimLeft(credential, " ")
 	}
 	if cookie, err := r.Cookie("artex_token"); err == nil {
 		return cookie.Value
