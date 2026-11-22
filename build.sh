@@ -163,8 +163,8 @@ compress_binary() {
 }
 
 package_binary() (
-  local binary="$1" goos="$2" goarch="$3"
-  local package_name="artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}"
+  local binary="$1" goos="$2"
+  local package_name="$3"
   local archive="${ARTEX_PACKAGE_DIR}/${package_name}.zip"
   local launcher=start.sh temporary
   [ "$goos" != windows ] || launcher=start.bat
@@ -220,24 +220,35 @@ build_target() {
 
   compress_binary "$output" "$goos"
   if command -v file >/dev/null 2>&1; then file "$output"; fi
-  if [ "$ARTEX_PACKAGE" = "1" ]; then package_binary "$output" "$goos" "$goarch"; fi
+  if [ "$ARTEX_PACKAGE" = "1" ]; then
+    local package_name="artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}"
+    package_binary "$output" "$goos" "$package_name"
+    release_archives+=("$package_name.zip")
+  fi
   ok "Build complete: $output"
 }
 
-write_checksums() {
-  [ "$ARTEX_PACKAGE" = "1" ] || return 0
-  checksum_file="$ARTEX_PACKAGE_DIR/SHA256SUMS"
+write_checksums() (
+  cd -- "$ARTEX_PACKAGE_DIR"
+  [ "$#" -gt 0 ] || die "no release archives were built"
+  [ ! -d SHA256SUMS ] || die "checksum destination is a directory"
+  local temporary
+  local -a hash_command
   if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$ARTEX_PACKAGE_DIR" && for archive in *.zip; do sha256sum "$archive"; done > "$(basename "$checksum_file")")
+    hash_command=(sha256sum)
   elif command -v shasum >/dev/null 2>&1; then
-    (cd "$ARTEX_PACKAGE_DIR" && for archive in *.zip; do shasum -a 256 "$archive"; done > "$(basename "$checksum_file")")
+    hash_command=(shasum -a 256)
   else
-    warn "sha256sum or shasum not found; skipping SHA256SUMS"
-    return 0
+    die "generating SHA256SUMS requires sha256sum or shasum"
   fi
-  ok "Checksum file: $checksum_file"
-}
+  temporary=$(mktemp .checksums.XXXXXXXX)
+  trap 'rm -f -- "$temporary"' EXIT
+  "${hash_command[@]}" "$@" > "$temporary"
+  mv -f -- "$temporary" SHA256SUMS
+  ok "Checksum file: $ARTEX_PACKAGE_DIR/SHA256SUMS"
+)
 
+release_archives=()
 mkdir -p "$ARTEX_OUTPUT_DIR"
 if [ "$ARTEX_PACKAGE" = "1" ]; then mkdir -p "$ARTEX_PACKAGE_DIR"; fi
 
@@ -253,6 +264,6 @@ for target in "${targets[@]}"; do
 done
 
 if [ "$ARTEX_PACKAGE" = "1" ]; then
-  write_checksums
+  write_checksums "${release_archives[@]}"
   info "Release packages written to: $ARTEX_PACKAGE_DIR"
 fi
