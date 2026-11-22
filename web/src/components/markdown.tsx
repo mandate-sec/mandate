@@ -3,6 +3,7 @@
 import * as React from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { externalWebLink } from "@/lib/external-link";
 
 // Tailwind-styled element overrides (no typography plugin in this project, so we
 // style each element). `node` is stripped — it's not a valid DOM attribute.
@@ -15,6 +16,16 @@ const components: Components = {
   ul: ({ node, ...p }) => <ul className="my-1 list-disc space-y-0.5 pl-5" {...p} />,
   ol: ({ node, ...p }) => <ol className="my-1 list-decimal space-y-0.5 pl-5" {...p} />,
   strong: ({ node, ...p }) => <strong className="font-semibold" {...p} />,
+  img: ({ src, alt }) => {
+    const href = typeof src === "string" ? externalWebLink(src) : undefined;
+    return href ? (
+      <a href={href} className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer">
+        {alt || "Open image"}
+      </a>
+    ) : (
+      <span>{alt || "Image"}</span>
+    );
+  },
   a: ({ node, ...p }) => (
     <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...p} />
   ),
