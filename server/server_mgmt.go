@@ -2059,10 +2059,14 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 
 	// Build HTTP client with optional proxy.
 	transport := &http.Transport{}
+	defer transport.CloseIdleConnections()
 	if p := strings.TrimSpace(req.Proxy); p != "" {
-		if pu, err := url.Parse(p); err == nil {
-			transport.Proxy = http.ProxyURL(pu)
+		pu, err := url.Parse(p)
+		if err != nil || pu.Hostname() == "" {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "代理地址无效"})
+			return
 		}
+		transport.Proxy = http.ProxyURL(pu)
 	}
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 || next.URL.Scheme != via[0].URL.Scheme || next.URL.Host != via[0].URL.Host {
@@ -2077,19 +2081,25 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	for _, c := range candidates {
 		httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, c.url, nil)
 		if err != nil {
-			lastErr = "构建请求失败: " + err.Error()
+			lastErr = "构建请求失败"
 			continue
 		}
 		httpReq.Header = c.hdr
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			lastErr = "请求失败: " + err.Error()
+			lastErr = "请求失败"
 			continue
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Sprintf("API 返回 %d: %s", resp.StatusCode, string(body[:min(len(body), 512)]))
+			resp.Body.Close()
+			lastErr = fmt.Sprintf("API 返回 %d", resp.StatusCode)
+			continue
+		}
+		const maxModelListBytes = 4 << 20
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxModelListBytes+1))
+		resp.Body.Close()
+		if readErr != nil || len(body) > maxModelListBytes {
+			lastErr = "无法读取完整模型列表"
 			continue
 		}
 		// Both OpenAI and Anthropic return {"data": [{"id": "..."},...]}.
@@ -2099,7 +2109,7 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(body, &parsed); err != nil {
-			lastErr = "解析响应失败: " + err.Error()
+			lastErr = "解析响应失败"
 			continue
 		}
 		models := make([]string, 0, len(parsed.Data))
