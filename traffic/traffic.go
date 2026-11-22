@@ -1,7 +1,7 @@
 // Package traffic implements the request-recording subsystem (docs §10): an
 // embedded go-mitmproxy proxy whose addon writes every target HTTP exchange into
 // a human-browsable file tree, with a sidecar SQLite index for paged queries.
-// Full capture, plaintext (no redaction), target HTTP only.
+// Target HTTP capture. URL credentials and selected headers are redacted before storage.
 package traffic
 
 import (
@@ -183,14 +183,10 @@ func Open(dir, addr string) (*Traffic, error) {
 	// than in a one-off Exec: the pool opens connections on demand, and an Exec
 	// only configures whichever one happened to serve it — leaving every other
 	// connection to fail instantly the moment a writer holds the database.
-	// The driver splits the DSN at the first '?', so a data directory containing
-	// one would silently name a different file; that path falls back to a bare
-	// DSN, where initIndex still applies the pragmas to its own connection.
+	// Quote SQLite URI delimiters in the filename before adding connection options.
 	index := filepath.Join(dir, "_index", "index.sqlite")
-	dsn := index
-	if !strings.ContainsRune(index, '?') {
-		dsn = "file:" + index + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
-	}
+	encodedPath := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(index)
+	dsn := "file:" + encodedPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -446,8 +442,9 @@ func (t *Traffic) record(f *mproxy.Flow) {
 	id := fmt.Sprintf("%d-%04d", now.Unix(), n%10000)
 
 	ct := f.Response.Header.Get("Content-Type")
-	url := f.Request.URL.String()
-	reqHead := fmt.Sprintf("%s %s %s\n%s", method, f.Request.URL.RequestURI(), f.Request.Proto, requestHeaderLines(f.Request))
+	storedURL := captureURL(f.Request.URL)
+	url := storedURL.String()
+	reqHead := fmt.Sprintf("%s %s %s\n%s", method, storedURL.RequestURI(), f.Request.Proto, requestHeaderLines(f.Request))
 	respHead := fmt.Sprintf("HTTP %d\n%s", f.Response.StatusCode, headerLines(f.Response.Header))
 	// Bodies are spilled before the transaction opens: blob writes are filesystem
 	// work and must not sit inside the SQLite write lock.
@@ -632,23 +629,6 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
-}
-
-func headerLines(h map[string][]string) string {
-	var b strings.Builder
-	for k, vs := range h {
-		switch strings.ToLower(k) {
-		case "authorization", "cookie", "set-cookie", "x-api-key", "proxy-authorization":
-			vs = []string{"[REDACTED]"}
-		}
-		for _, v := range vs {
-			b.WriteString(k)
-			b.WriteString(": ")
-			b.WriteString(v)
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
 }
 
 // requestHeaderLines restores the HTTP Host header, which net/http stores on

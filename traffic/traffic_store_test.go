@@ -67,6 +67,47 @@ func onlyExchangeID(t *testing.T, tr *Traffic) string {
 	return id
 }
 
+func TestRecordOmitsURLCredentialsFromSQLite(t *testing.T) {
+	tr, _ := openTraffic(t)
+	const marker = "capturePrivateFixture"
+	f := newFlow("sample.test", "GET", "/path?arbitrary="+marker, nil, nil)
+	f.Request.URL.User = url.UserPassword("user", marker)
+	f.Response.Header.Set("Location", "https://sample.test/next?code="+marker)
+	tr.record(f)
+	var stored, request, response string
+	err := tr.DB().QueryRow(`SELECT e.url, b.req_head, b.resp_head
+		FROM exchanges e JOIN exchange_bodies b ON b.id=e.id`).Scan(&stored, &request, &response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != "http://sample.test/path?redacted" || !strings.Contains(request, "GET /path?redacted HTTP/1.1") ||
+		strings.Contains(request+response, marker) {
+		t.Fatal("unexpected persisted capture")
+	}
+	if tr.fts {
+		var count int
+		if err := tr.DB().QueryRow(`SELECT count(*) FROM ex_fts WHERE ex_fts MATCH 'redacted'`).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("redacted capture missing from search index: %d, %v", count, err)
+		}
+		if err := tr.DB().QueryRow(`SELECT count(*) FROM ex_fts WHERE ex_fts MATCH ?`, marker).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("unexpected search matches: %d, %v", count, err)
+		}
+		t.Log("verified full-text index")
+	}
+}
+
+func TestCaptureIndexPathWithURIDelimiters(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures#one%23two")
+	tr, err := Open(dir, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	if _, err := os.Stat(filepath.Join(dir, "_index", "index.sqlite")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestRecordKeepsBodiesInIndex is the core of the storage change: a recorded
 // exchange produces no per-request directory at all, and its bodies are served
 // back out of SQLite.
