@@ -2,6 +2,8 @@
 
 This fork adds capture-header redaction, a restricted environment for Python custom tools, and an [offline signed engagement record tool](tools/mandate/README.md). The agent does not yet enforce these records or enter read-only mode on expiry. See [provenance](PROVENANCE.md) for the base revision.
 
+Read [How authorization works](docs/AUTHORIZATION.md) for signer approval, verification, renewal, and current enforcement limits.
+
 ## Upstream documentation
 
 <p align="center">

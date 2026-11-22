@@ -2,6 +2,8 @@
 
 This offline utility signs and verifies engagement records. The server does not enforce these records. A valid signature authenticates a document under the selected public key. It does not establish ownership of a target.
 
+Start with [How authorization works](../../docs/AUTHORIZATION.md) to choose a trusted signer and review a record.
+
 Use Python 3.11 or later and install the pinned dependency from this directory with `python -m pip install -r requirements.txt`. Run the following commands from the same directory.
 
 ```text
