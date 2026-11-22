@@ -22,8 +22,9 @@ def docker(*args, check=True, input=None):
 
 
 def api(path, method='GET', payload=None, token=None):
-    # Values are serialized as Python literals, never interpolated into a shell.
-    program = '''import json,urllib.request,urllib.error
+    # Send credentials over stdin so they cannot appear in process listings or timeout errors.
+    program = '''import json,sys,urllib.request,urllib.error
+PATH,METHOD,PAYLOAD,TOKEN=json.load(sys.stdin)
 request=urllib.request.Request('http://127.0.0.1:8787'+PATH,method=METHOD,
  data=None if PAYLOAD is None else json.dumps(PAYLOAD).encode(),
  headers={'Content-Type':'application/json',**({'Authorization':'Bearer '+TOKEN} if TOKEN else {})})
@@ -36,8 +37,8 @@ try: body=json.loads(raw)
 except ValueError: body=raw
 print(json.dumps({'status':response.status,'body':body}))
 '''
-    prelude = f'PATH={path!r}\nMETHOD={method!r}\nPAYLOAD={payload!r}\nTOKEN={token!r}\n'
-    return json.loads(docker('exec', app, 'python3', '-c', prelude + program).stdout)
+    request_data = json.dumps([path, method, payload, token])
+    return json.loads(docker('exec', '-i', app, 'python3', '-c', program, input=request_data).stdout)
 
 
 def expect(result, status):
@@ -103,7 +104,7 @@ try:
     else:
         raise RuntimeError('ARTEX did not become healthy after restart')
     expect(api('/api/tasks', token=token), 200)
-    print('Runtime smoke: embedded UI, PostgreSQL, auth, updater, browsers, raw scan, shutdown and persisted JWT passed')
+    print('Runtime smoke: embedded UI, PostgreSQL, auth, updater, browsers, unprivileged runtime, shutdown and persisted JWT passed')
     new_password = secrets.token_urlsafe(24)
     expect(api('/api/auth/change-password', 'POST', {'old_password': password, 'new_password': new_password}, token), 200)
     expect(api('/api/tasks', token=token), 401)
