@@ -109,6 +109,52 @@ def signed(obj, key):
     return data
 
 
+def check_approval(obj, path):
+    """Compare a verified record with a grant provisioned by its reviewer."""
+    with path.open("rb") as stream:
+        raw = stream.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("approval exceeds 64 KiB")
+    grant = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+    exact(grant, "key_fingerprint targets checks max_concurrency expires")
+    if grant["key_fingerprint"] != obj["authorized_by"]["key_fingerprint"]:
+        raise ValueError("approval is for a different signer")
+    if timestamp(obj["expires"]) > timestamp(grant["expires"]):
+        raise ValueError("record outlasts the approval")
+    limit = grant["max_concurrency"]
+    if type(limit) is not int or not 1 <= obj["constraints"]["max_concurrency"] <= limit <= 10:
+        raise ValueError("concurrency outside approval")
+    checks = grant["checks"]
+    if not isinstance(checks, list) or not all(isinstance(v, str) and v in CHECKS for v in checks):
+        raise ValueError("invalid approved checks")
+    if not set(obj["scope"]["checks"]).issubset(checks):
+        raise ValueError("record requests an unapproved check")
+    targets = grant["targets"]
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 256:
+        raise ValueError("expected 1 to 256 approved targets")
+    names, networks = set(), set()
+    for value in targets:
+        if not isinstance(value, str):
+            raise ValueError("invalid approved target")
+        target(value)
+        try:
+            networks.add(ipaddress.ip_network(value))
+        except ValueError:
+            names.add(value.lower())
+    for value in set(obj["scope"]["targets"]):
+        try:
+            network = ipaddress.ip_network(value)
+        except ValueError:
+            if value.lower() in names:
+                continue
+        else:
+            while network not in networks and network.prefixlen:
+                network = network.supernet()
+            if network in networks:
+                continue
+        raise ValueError("target outside approval: " + value)
+
+
 def verify(path, key_path, now, allow_expired=False):
     key = ser.load_pem_public_key(key_path.read_bytes())
     if not isinstance(key, Ed25519PublicKey):
@@ -133,6 +179,8 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     for cmd in ("keygen", "create", "verify", "renew"):
         p = sub.add_parser(cmd)
+        if cmd == "verify":
+            p.add_argument("--approval", type=Path, help="reviewer-provisioned signer and scope grant")
         if cmd != "verify":
             p.add_argument("--key", type=Path, default=KEYS / "signer.pem")
         p.add_argument("--trusted-key", type=Path, default=KEYS / "signer.pub")
@@ -162,6 +210,10 @@ def main():
         return
     if args.cmd == "verify":
         obj = verify(args.file, args.trusted_key, now)
+        if args.approval is not None:
+            check_approval(obj, args.approval)
+            print("Signed record fits the selected approval:", obj["engagement"], "until", obj["expires"])
+            return
         print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
         return
     key = ser.load_pem_private_key(args.key.read_bytes(), getpass.getpass("Signing passphrase: ").encode())

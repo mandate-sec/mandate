@@ -21,6 +21,17 @@ class Records(unittest.TestCase):
             expiry=(now+timedelta(days=1)).isoformat()
             run("create","--engagement","local","--targets","localhost","--checks","web_scan","--name","Local","--email","local@example.org","--expires",expiry)
             run("verify")
+            grant = root / "approval.json"
+            approval = dict(key_fingerprint=json.loads(record.read_text())["authorized_by"]["key_fingerprint"],
+                            targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
+            grant.write_text(json.dumps(approval))
+            run("verify", "--approval", str(grant))
+            for change in ({"targets": ["other.example"]}, {"checks": []}, {"max_concurrency": True},
+                           {"key_fingerprint": "other"}, {"expires": now.isoformat()}):
+                with self.subTest(change=change):
+                    grant.write_text(json.dumps(approval | change))
+                    with self.assertRaises(ValueError):
+                        run("verify", "--approval", str(grant))
             with self.assertRaises(ValueError): mandate.verify(record,public,now+timedelta(days=2))
             run("renew","--expires",(now+timedelta(days=3)).isoformat())
             run("verify")

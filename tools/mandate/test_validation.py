@@ -6,6 +6,24 @@ import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_approval_network_containment(self):
+        import json
+        expires = "2030-01-01T00:00:00Z"
+        grant = dict(key_fingerprint="test", targets=["192.0.2.0/28", "2001:db8::/64"],
+                     checks=["web_scan"], max_concurrency=2, expires=expires)
+        record = dict(authorized_by={"key_fingerprint": "test"}, constraints={"max_concurrency": 2},
+                      scope={"checks": ["web_scan"]}, expires=expires)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "grant.json"
+            path.write_text(json.dumps(grant))
+            for value in ("192.0.2.0/28", "192.0.2.8/29", "192.0.2.15", "2001:db8::1"):
+                record["scope"]["targets"] = [value]
+                mandate.check_approval(record, path)
+            for value in ("192.0.2.0/27", "192.0.2.16", "::ffff:192.0.2.1", "example.org"):
+                record["scope"]["targets"] = ["192.0.2.1", value]
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "outside approval"):
+                    mandate.check_approval(record, path)
+
     def test_reject_ambiguous_numeric_hosts(self):
         for value in ("127.1", "2130706433", "0x7f000001", "0127.0.0.1", "999.1.2.3", "fe80::1%eth0"):
             with self.subTest(value=value), self.assertRaises(ValueError):
