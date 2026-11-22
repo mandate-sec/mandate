@@ -1,12 +1,23 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 const jwtTTL = 7 * 24 * time.Hour
+
+func sessionSigningKey(key []byte, generation string) []byte {
+	if generation == "" {
+		return key // Sessions issued before the first password change.
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(generation))
+	return mac.Sum(nil)
+}
 
 // signJWT issues a 7-day HS256 token for user ARTEX.
 func signJWT(key []byte) (string, error) {

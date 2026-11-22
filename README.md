@@ -16,6 +16,8 @@ Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before star
 
 ## Browser sessions
 
+Changing the administrator password invalidates earlier tokens for subsequent API requests, including reconnects. A response or event stream already open can continue until it closes. To terminate existing streams immediately after a suspected compromise, restart each console instance.
+
 Upgrading to the new session key format signs everyone out once. Sign in again with your existing password. The server generates a fresh 32-byte key in `keys/session-v2.key` beside the executable (in the existing keys volume for Compose). The storage filesystem must support hard links. Protect this directory with owner-only write access and keep it outside the browsable data directory. On Windows, restrict its ACL to the service account and trusted administrators. Legacy `jwt.key` files and backups can contain secrets accepted by older builds. This upgrade leaves those files untouched and retires their keys on the upgraded server.
 
 The console defaults to `127.0.0.1:8787` and the recording proxy to `127.0.0.1:8788`. Use `--listen` (or `-addr`) for the console. Either listener requires `MANDATE_I_UNDERSTAND_THIS_IS_DANGEROUS=yes` for an address other than a numeric loopback IP. Compose sets this inside the app container so Docker can forward the console port to host loopback. Other containers on that Compose network can still reach the console. The recording proxy listens only on the app container's loopback interface by default.

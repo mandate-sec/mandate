@@ -34,3 +34,16 @@ func TestSessionJWTPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestPasswordChangeRevokesPreviousGeneration(t *testing.T) {
+	key := []byte("fixture signing key")
+	for _, previous := range []string{"", "previous-change"} {
+		token, err := signJWT(sessionSigningKey(key, previous))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !verifyJWT(token, sessionSigningKey(key, previous)) || verifyJWT(token, sessionSigningKey(key, "new-change")) {
+			t.Fatal("session must validate exclusively under its original generation")
+		}
+	}
+}

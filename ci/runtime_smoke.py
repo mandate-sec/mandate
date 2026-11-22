@@ -101,6 +101,12 @@ try:
         raise RuntimeError('ARTEX did not become healthy after restart')
     expect(api('/api/tasks', token=token), 200)
     print('Runtime smoke: embedded UI, PostgreSQL, auth, updater, browsers, raw scan, shutdown and persisted JWT passed')
+    new_password = secrets.token_urlsafe(24)
+    expect(api('/api/auth/change-password', 'POST', {'old_password': password, 'new_password': new_password}, token), 200)
+    expect(api('/api/tasks', token=token), 401)
+    expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': password}), 401)
+    fresh = expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': new_password}), 200)['token']
+    expect(api('/api/tasks', token=fresh), 200)
 except Exception:
     for container in (app, pg):
         print(docker('logs', '--tail', '80', container, check=False).stderr, file=sys.stderr)

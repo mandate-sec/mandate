@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+func signTestSession(s *Server) (string, error) {
+	generation, _, err := s.m.pg.GetSetting("auth.session_generation")
+	if err != nil {
+		return "", err
+	}
+	return signJWT(sessionSigningKey(s.jwtKey, generation))
+}
+
 // GetSetting 对"键不存在"和"读取出错"的返回值只差一个 error：两种情况 value 都是
 // 空串。密码相关的 handler 一旦把 error 当成"还没设置密码"，就会在数据库抖动期间
 // 敞开初始化入口——authInit 会放行一个未认证请求去覆盖已有的管理员密码，

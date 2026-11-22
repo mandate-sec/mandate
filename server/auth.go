@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"os"
@@ -51,7 +52,16 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "未授权")
 			return
 		}
-		if !verifyJWT(tok, s.jwtKey) {
+		pg := s.pg(w)
+		if pg == nil {
+			return
+		}
+		generation, _, err := pg.GetSetting("auth.session_generation")
+		if err != nil {
+			writeErr(w, 503, errDataSourceUnavailable)
+			return
+		}
+		if !verifyJWT(tok, sessionSigningKey(s.jwtKey, generation)) {
 			writeErr(w, 401, "token 无效或已过期")
 			return
 		}
@@ -78,11 +88,12 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/init — sets the password for the first time; rejected if already set.
 func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	pg := s.pg(w)
 	if pg == nil {
 		return
 	}
-	existing, _, err := pg.GetSetting(authPassKey)
+	existing, generation, err := pg.AdminCredentials()
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -124,7 +135,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "密码已设置")
 		return
 	}
-	tok, err := signJWT(s.jwtKey)
+	tok, err := signJWT(sessionSigningKey(s.jwtKey, generation))
 	if err != nil {
 		writeErr(w, 500, "token 生成失败")
 		return
@@ -132,16 +143,11 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"token": tok})
 }
 
-// POST /api/auth/change-password — changes the admin password. Requires a valid
-// token (this route is under /api/auth/* which requireAuth exempts, so the token
-// is validated here) AND the current password.
+// POST /api/auth/change-password requires a current session and the current password.
 func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	pg := s.pg(w)
 	if pg == nil {
-		return
-	}
-	if !verifyJWT(extractToken(r), s.jwtKey) {
-		writeErr(w, 401, "未授权")
 		return
 	}
 	var req struct {
@@ -160,12 +166,16 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, msg)
 		return
 	}
-	hash, ok, err := pg.GetSetting(authPassKey)
+	hash, generation, err := pg.AdminCredentials()
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
-	if !ok || hash == "" {
+	if !verifyJWT(extractToken(r), sessionSigningKey(s.jwtKey, generation)) {
+		writeErr(w, 401, "未授权")
+		return
+	}
+	if hash == "" {
 		writeErr(w, 403, "密码未初始化，请先设置密码")
 		return
 	}
@@ -178,8 +188,13 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "密码加密失败")
 		return
 	}
-	if err := pg.SetSetting(authPassKey, string(newHash)); err != nil {
+	changed, err := pg.ChangeAdminPassword(hash, string(newHash), rand.Text())
+	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
+	if !changed {
+		writeErr(w, 409, "Password changed concurrently. Sign in again.")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -187,6 +202,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/login — validates username/password and returns a JWT.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	pg := s.pg(w)
 	if pg == nil {
 		return
@@ -203,12 +219,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}
-	hash, ok, err := pg.GetSetting(authPassKey)
+	hash, generation, err := pg.AdminCredentials()
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
-	if !ok || hash == "" {
+	if hash == "" {
 		writeErr(w, 403, "密码未初始化，请先设置密码")
 		return
 	}
@@ -216,7 +232,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}
-	tok, err := signJWT(s.jwtKey)
+	tok, err := signJWT(sessionSigningKey(s.jwtKey, generation))
 	if err != nil {
 		writeErr(w, 500, "token 生成失败")
 		return
