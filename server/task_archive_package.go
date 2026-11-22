@@ -44,6 +44,7 @@ type archiveRestoreJournal struct {
 }
 
 type taskArchiveFileStage struct {
+	dataDir string
 	root    string
 	payload string
 	journal archiveStageJournal
@@ -56,6 +57,7 @@ type restoredArchivePath struct {
 }
 
 type taskArchiveRestoreFiles struct {
+	dataDir   string
 	extracted string
 	moves     []restoredArchivePath
 	done      bool
@@ -89,13 +91,98 @@ func taskArchivePath(dataDir string, archiveID int64, taskID string) string {
 	return filepath.Join(taskArchiveRoot(dataDir), fmt.Sprintf("task-%s-%d.tar.zst", taskID, archiveID))
 }
 
+// Journal entries must describe the same task directory or transcript on both
+// sides. Validate the entire plan before applying even its first rename.
+func validArchivePair(dataDir, payload, task, live, staged string) bool {
+	rel, err := filepath.Rel(dataDir, live)
+	if err != nil || !filepath.IsLocal(rel) || live != filepath.Join(dataDir, rel) {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) != 2 || !filepath.IsLocal(parts[1]) {
+		return false
+	}
+	if parts[0] != "transcripts" && !(parts[0] == "tasks" && parts[1] == task) {
+		return false
+	}
+	return staged == filepath.Join(payload, "files", rel)
+}
+
+func (j archiveStageJournal) validate(dataDir, stage string, archiveID int64, task string) error {
+	id, err := strconv.ParseInt(task, 10, 64)
+	if err != nil || id <= 0 || strconv.FormatInt(id, 10) != task || archiveID <= 0 || j.ArchiveID != archiveID || j.TaskID != task || filepath.Base(stage) != strconv.FormatInt(archiveID, 10) {
+		return errors.New("invalid archive staging journal identity")
+	}
+	payload := filepath.Join(stage, "payload")
+	for _, m := range j.Moves {
+		if !filepath.IsLocal(m.Relative) || m.Relative != filepath.Clean(m.Relative) || !validArchivePair(dataDir, payload, task, m.Source, filepath.Join(payload, m.Relative)) {
+			return errors.New("invalid staging journal move")
+		}
+	}
+	return nil
+}
+
+func (j archiveRestoreJournal) validate(dataDir, stage string) error {
+	if j.ArchiveID <= 0 || j.TaskID <= 0 || !strings.HasPrefix(filepath.Base(stage), strconv.FormatInt(j.ArchiveID, 10)+"-") {
+		return errors.New("invalid restore journal identity")
+	}
+	for _, m := range j.Moves {
+		if !validArchivePair(dataDir, stage, strconv.FormatInt(j.TaskID, 10), m.Destination, m.Source) {
+			return errors.New("invalid restore journal move")
+		}
+	}
+	return nil
+}
+
+func removeArchiveDirectory(dataDir, path string) error {
+	rel, err := filepath.Rel(dataDir, path)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsLocal(rel) || rel == "." {
+		return errors.New("invalid archive cleanup directory")
+	}
+	root, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.RemoveAll(rel)
+}
+
+func moveArchivePath(dataDir, source, destination string, mode fs.FileMode) error {
+	from, err := filepath.Rel(dataDir, source)
+	if err != nil {
+		return err
+	}
+	to, err := filepath.Rel(dataDir, destination)
+	if err != nil {
+		return err
+	}
+	if !filepath.IsLocal(from) || !filepath.IsLocal(to) || from == "." || to == "." {
+		return errors.New("archive move outside data directory")
+	}
+	root, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(to), mode); err != nil {
+		return err
+	}
+	return root.Rename(from, to)
+}
+
 func stageTaskArchiveFiles(dataDir string, archiveID int64, taskID string, explorationID int64) (*taskArchiveFileStage, error) {
 	root := filepath.Join(taskArchiveRoot(dataDir), ".staging", strconv.FormatInt(archiveID, 10))
-	stage := &taskArchiveFileStage{root: root, payload: filepath.Join(root, "payload")}
+	stage := &taskArchiveFileStage{dataDir: dataDir, root: root, payload: filepath.Join(root, "payload")}
 	journalPath := filepath.Join(root, "journal.json")
 	if raw, err := os.ReadFile(journalPath); err == nil {
 		if err := json.Unmarshal(raw, &stage.journal); err != nil {
 			return nil, fmt.Errorf("read task archive staging journal: %w", err)
+		}
+		if err := stage.journal.validate(dataDir, root, archiveID, taskID); err != nil {
+			return nil, err
 		}
 		// The journal is written before the first rename, so its presence does not mean
 		// the payload is complete: a previous round may have failed mid-loop with a
@@ -171,10 +258,7 @@ func (s *taskArchiveFileStage) applyMoves() error {
 			}
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(destination), archiveDirMode); err != nil {
-			return err
-		}
-		if err := os.Rename(move.Source, destination); err != nil {
+		if err := moveArchivePath(s.dataDir, move.Source, destination, archiveDirMode); err != nil {
 			return fmt.Errorf("stage task archive path %s: %w", move.Source, err)
 		}
 	}
@@ -202,16 +286,12 @@ func (s *taskArchiveFileStage) rollback() error {
 			errs = append(errs, err)
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(move.Source), 0o755); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := os.Rename(staged, move.Source); err != nil {
+		if err := moveArchivePath(s.dataDir, staged, move.Source, 0o755); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) == 0 {
-		if err := os.RemoveAll(s.root); err != nil {
+		if err := removeArchiveDirectory(s.dataDir, s.root); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -224,11 +304,11 @@ func (s *taskArchiveFileStage) commit() error {
 		return nil
 	}
 	s.done = true
-	return os.RemoveAll(s.root)
+	return removeArchiveDirectory(s.dataDir, s.root)
 }
 
 func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int64) (*taskArchiveRestoreFiles, error) {
-	stage := &taskArchiveRestoreFiles{extracted: extractedDir}
+	stage := &taskArchiveRestoreFiles{dataDir: dataDir, extracted: extractedDir}
 	numericTaskID, err := strconv.ParseInt(taskID, 10, 64)
 	if err != nil || numericTaskID <= 0 {
 		return nil, fmt.Errorf("invalid restore task id %q", taskID)
@@ -263,11 +343,7 @@ func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int
 		return nil, err
 	}
 	for _, move := range sources {
-		if err := os.MkdirAll(filepath.Dir(move.Destination), 0o755); err != nil {
-			_ = stage.rollback()
-			return nil, err
-		}
-		if err := os.Rename(move.Source, move.Destination); err != nil {
+		if err := moveArchivePath(dataDir, move.Source, move.Destination, 0o755); err != nil {
 			_ = stage.rollback()
 			return nil, err
 		}
@@ -295,11 +371,7 @@ func (s *taskArchiveRestoreFiles) rollback() error {
 			errs = append(errs, err)
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(move.Source), archiveDirMode); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := os.Rename(move.Destination, move.Source); err != nil {
+		if err := moveArchivePath(s.dataDir, move.Destination, move.Source, archiveDirMode); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -312,7 +384,7 @@ func (s *taskArchiveRestoreFiles) commit() error {
 		return nil
 	}
 	s.done = true
-	return os.RemoveAll(s.extracted)
+	return removeArchiveDirectory(s.dataDir, s.extracted)
 }
 
 // recoverTaskArchiveRestoreStages resolves file installs left by an interrupted
@@ -337,7 +409,7 @@ func recoverTaskArchiveRestoreStages(dataDir string, pg *pgdb.DB) error {
 		raw, err := os.ReadFile(filepath.Join(root, "restore-journal.json"))
 		if os.IsNotExist(err) {
 			// Extraction was interrupted before any destination rename.
-			if err := os.RemoveAll(root); err != nil {
+			if err := removeArchiveDirectory(dataDir, root); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -348,6 +420,10 @@ func recoverTaskArchiveRestoreStages(dataDir string, pg *pgdb.DB) error {
 		}
 		var journal archiveRestoreJournal
 		if err := json.Unmarshal(raw, &journal); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := journal.validate(dataDir, root); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -366,17 +442,17 @@ func recoverTaskArchiveRestoreStages(dataDir string, pg *pgdb.DB) error {
 			continue
 		}
 		if restored {
-			if err := os.RemoveAll(root); err != nil {
+			if err := removeArchiveDirectory(dataDir, root); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
-		stage := &taskArchiveRestoreFiles{extracted: root, moves: journal.Moves}
+		stage := &taskArchiveRestoreFiles{dataDir: dataDir, extracted: root, moves: journal.Moves}
 		if err := stage.rollback(); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if err := os.RemoveAll(root); err != nil {
+		if err := removeArchiveDirectory(dataDir, root); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -409,7 +485,7 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			// copies already inside the package. Without a journal there is nothing to
 			// roll back, and reporting an error here keeps the archive worker from ever
 			// starting, so discard the directory instead.
-			if err := os.RemoveAll(root); err != nil {
+			if err := removeArchiveDirectory(dataDir, root); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -423,18 +499,26 @@ func recoverTaskArchiveStages(dataDir string, pg *pgdb.DB) error {
 			errs = append(errs, err)
 			continue
 		}
+		if err := journal.validate(dataDir, root, journal.ArchiveID, journal.TaskID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		archive, getErr := pg.GetTaskArchive(journal.ArchiveID)
 		if getErr != nil {
 			errs = append(errs, getErr)
 			continue
 		}
+		if archive != nil && strconv.FormatInt(archive.TaskID, 10) != journal.TaskID {
+			errs = append(errs, errors.New("staging journal task differs from archive record"))
+			continue
+		}
 		if archive != nil && archive.State == pgdb.ArchiveReady {
-			if err := os.RemoveAll(root); err != nil {
+			if err := removeArchiveDirectory(dataDir, root); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
-		stage := &taskArchiveFileStage{root: root, payload: filepath.Join(root, "payload"), journal: journal}
+		stage := &taskArchiveFileStage{dataDir: dataDir, root: root, payload: filepath.Join(root, "payload"), journal: journal}
 		if err := stage.rollback(); err != nil {
 			errs = append(errs, err)
 		}

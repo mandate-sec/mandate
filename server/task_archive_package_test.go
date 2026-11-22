@@ -159,7 +159,7 @@ func TestTaskArchiveStageJournalRollsBackInterruptedMoves(t *testing.T) {
 	if len(journal.Moves) != 2 {
 		t.Fatalf("journal moves=%d, want 2", len(journal.Moves))
 	}
-	recovered := &taskArchiveFileStage{root: stage.root, payload: stage.payload, journal: journal}
+	recovered := &taskArchiveFileStage{dataDir: dataDir, root: stage.root, payload: stage.payload, journal: journal}
 	if err := recovered.rollback(); err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +167,30 @@ func TestTaskArchiveStageJournalRollsBackInterruptedMoves(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("interrupted archive did not restore %s: %v", path, err)
 		}
+	}
+}
+
+func TestArchiveJournalRejectsMismatchedMoves(t *testing.T) {
+	data := t.TempDir()
+	stage := filepath.Join(taskArchiveRoot(data), ".staging", "9")
+	live := filepath.Join(data, "tasks", "42")
+	rel := filepath.Join("files", "tasks", "42")
+	j := archiveStageJournal{ArchiveID: 9, TaskID: "42", Moves: []archiveFileMove{{Source: live, Relative: rel}}}
+	if err := j.validate(data, stage, 9, "42"); err != nil {
+		t.Fatal(err)
+	}
+	j.Moves[0].Source = filepath.Join(data, "tasks", "43")
+	if err := j.validate(data, stage, 9, "42"); err == nil {
+		t.Fatal("accepted another task's directory")
+	}
+	restore := filepath.Join(taskArchiveRoot(data), ".restore", "9-test")
+	r := archiveRestoreJournal{ArchiveID: 9, TaskID: 42, Moves: []restoredArchivePath{{Source: filepath.Join(restore, rel), Destination: live}}}
+	if err := r.validate(data, restore); err != nil {
+		t.Fatal(err)
+	}
+	r.Moves[0].Destination = filepath.Join(t.TempDir(), "outside")
+	if err := r.validate(data, restore); err == nil {
+		t.Fatal("accepted outside destination")
 	}
 }
 
@@ -199,7 +223,7 @@ func TestTaskArchiveRestoreJournalRollsBackInterruptedInstall(t *testing.T) {
 	if journal.ArchiveID != 11 || len(journal.Moves) != 1 {
 		t.Fatalf("unexpected restore journal: %+v", journal)
 	}
-	recovered := &taskArchiveRestoreFiles{extracted: extracted, moves: journal.Moves}
+	recovered := &taskArchiveRestoreFiles{dataDir: dataDir, extracted: extracted, moves: journal.Moves}
 	if err := recovered.rollback(); err != nil {
 		t.Fatal(err)
 	}
