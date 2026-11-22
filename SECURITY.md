@@ -54,10 +54,7 @@ scope, rules of engagement, and applicable law.
 
 ## Known residual risks
 
-1. **Source provenance.** The `v0.3.15` source comes from a mirror of the
-   original project because the original upstream is unavailable. The build is
-   reproducible from this tree, but that proves the binary matches the tree,
-   not that the tree matches the original author's last release.
+1. **Source and build provenance.** The [provenance record](PROVENANCE.md) identifies the base Git commit and provides an offline check for its checksum and ancestry. CI records the image ID from a single build. Establishing byte-for-byte reproducibility for a release requires comparing independent builds of the same revision with the same inputs. The recorded image ID alone leaves that comparison open.
 2. **Dependency trust.** Third-party Go modules, apt packages, npm packages,
    and Chromium are verified by their ecosystems but not audited line by line.
    The browser stack is the largest third-party surface in the image.
