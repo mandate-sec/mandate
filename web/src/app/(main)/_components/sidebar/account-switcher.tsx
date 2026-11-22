@@ -84,7 +84,7 @@ export function AccountSwitcher({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
             <LogOut />
-            Sign out
+            Sign out of this browser
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

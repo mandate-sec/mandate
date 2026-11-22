@@ -62,6 +62,7 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		}
 		tok := extractToken(r)
 		if tok == "" {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeErr(w, 401, "未授权")
 			return
 		}
@@ -76,6 +77,7 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		}
 		expires, valid := sessionExpiry(tok, sessionSigningKey(s.jwtKey, generation))
 		if !valid {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeErr(w, 401, "token 无效或已过期")
 			return
 		}

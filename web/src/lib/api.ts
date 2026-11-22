@@ -122,8 +122,8 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
-  if (r.status === 401) {
-    if (typeof window !== "undefined") {
+  if (r.status === 401 && r.headers.get("WWW-Authenticate") === "Bearer") {
+    if (typeof window !== "undefined" && getToken() === token) {
       localStorage.removeItem("artex_token");
       document.cookie = "artex_token=; path=/; max-age=0";
       window.location.href = "/login";
