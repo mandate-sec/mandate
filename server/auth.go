@@ -117,6 +117,39 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
+// Go's struct decoder matches field names case-insensitively and lets the
+// final occurrence win. Credential fields must have one unambiguous value.
+func hasUniqueAuthFields(body []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return false
+	}
+	fields := [...]string{"username", "password", "setupToken", "old_password", "new_password"}
+	var seen [len(fields)]bool
+	for decoder.More() {
+		token, err := decoder.Token()
+		name, ok := token.(string)
+		if err != nil || !ok {
+			return false
+		}
+		for i, field := range fields {
+			if strings.EqualFold(name, field) {
+				if seen[i] {
+					return false
+				}
+				seen[i] = true
+				break
+			}
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // Read the entire bounded document so trailing values and over-limit padding
 // cannot be hidden behind a valid first JSON value.
 func readAuthRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -141,7 +174,7 @@ func readAuthRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 	}
 	// The JSON decoder accepts null for a struct and silently replaces invalid
 	// UTF-8 in strings. Both are inappropriate for credential documents.
-	if err != nil || !utf8.Valid(body) || bytes.Equal(bytes.TrimSpace(body), []byte("null")) || json.Unmarshal(body, dst) != nil {
+	if err != nil || !utf8.Valid(body) || !hasUniqueAuthFields(body) || json.Unmarshal(body, dst) != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式错误")
 		return false
 	}

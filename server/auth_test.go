@@ -280,3 +280,23 @@ func TestAuthBodyReadDeadline(t *testing.T) {
 		t.Fatalf("unexpected read deadline: %v", w.deadline)
 	}
 }
+
+func TestAuthCredentialFieldsMustBeUnique(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		ok   bool
+	}{
+		{`{"password":"first","password":"second"}`, false},
+		{`{"password":"first","PASSWORD":"second"}`, false},
+		{`{"new_password":"first","new_\u0070assword":"second"}`, false},
+		{`{"username":"user","password":"pass","extra":{"password":"nested"}}`, true},
+		{`{"password":"pass"}{}`, false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+		w := httptest.NewRecorder()
+		var dst struct{ Password string }
+		if ok := readAuthRequest(w, r, &dst); ok != tc.ok || (!ok && w.Code != http.StatusBadRequest) {
+			t.Fatalf("accepted=%v status=%d for %s", ok, w.Code, tc.body)
+		}
+	}
+}
