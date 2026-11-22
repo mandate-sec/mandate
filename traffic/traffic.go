@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -181,13 +182,35 @@ func CheckLegacyCA(dir string) error {
 	return errors.New("legacy proxy signing key in workspace: move traffic/_ca/mitmproxy-ca.pem to protected offline storage and remove the old CA from client trust stores before restarting")
 }
 
+// A private parent protects existing databases, journals and older blob files
+// without changing the permissions of a directory supplied by the operator.
+func prepareCaptureDirectory(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New("capture storage requires a directory, not a link or file")
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return errors.New("capture directory is accessible to other accounts: restrict its permissions to 0700 before starting capture")
+	}
+	return nil
+}
+
 // Open initializes the traffic tree, blob store and SQLite index under dir.
 func Open(dir, addr string) (*Traffic, error) {
+	if err := prepareCaptureDirectory(dir); err != nil {
+		return nil, err
+	}
 	if err := CheckLegacyCA(dir); err != nil {
 		return nil, err
 	}
-	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_blobs")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+	for _, d := range []string{filepath.Join(dir, "_index"), filepath.Join(dir, "_blobs")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
 	}
@@ -525,13 +548,13 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 	// One bucket level (256 buckets) is enough to keep any single directory small;
 	// the store only ever holds bodies above maxInlineBody, deduplicated by hash.
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+	if err := os.MkdirAll(blobDir, 0o700); err != nil {
 		log.Printf("[traffic] 创建 blob 目录失败：%v", err)
 		return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 	}
 	blobPath := filepath.Join(blobDir, h+".bin")
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
-		if err := os.WriteFile(blobPath, body, 0o644); err != nil {
+		if err := os.WriteFile(blobPath, body, 0o600); err != nil {
 			log.Printf("[traffic] 写 blob %s 失败：%v", h, err)
 			return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
 		}
