@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -122,21 +122,17 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 
 var unsafeFilenameChars = regexp.MustCompile(`[^\p{Han}\p{L}\p{N}._-]+`)
 
-// FindingFilename 为「一漏洞一文件」生成安全的 .md 文件名,形如
-// `critical_SQL注入_#123.md`。去掉路径分隔符与控制字符,避免 zip 内非法路径。
+// FindingFilename keeps the unique ID even when a long title must be shortened.
 func FindingFilename(f *db.DBFinding) string {
-	sev := nz(f.Severity, "info")
-	title := findingTitle(f)
-	name := fmt.Sprintf("%s_%s_#%d", sev, title, f.ID)
-	name = unsafeFilenameChars.ReplaceAllString(name, "_")
-	name = strings.Trim(name, "._")
-	if name == "" {
-		name = fmt.Sprintf("finding_%d", f.ID)
-	}
-	// 防御性:再剥一层路径,杜绝 zip slip。
-	name = path.Base(name)
-	if len(name) > 120 {
-		name = name[:120]
+	label := nz(f.Severity, "info") + "_" + findingTitle(f)
+	name := fmt.Sprintf("%d_%s", f.ID, unsafeFilenameChars.ReplaceAllString(label, "_"))
+	const limit = 120
+	if len(name) > limit {
+		end := limit
+		for !utf8.RuneStart(name[end]) {
+			end--
+		}
+		name = name[:end]
 	}
 	return name + ".md"
 }

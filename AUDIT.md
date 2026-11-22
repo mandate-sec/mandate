@@ -1,6 +1,6 @@
 # Mandate security review
 
-This record covers 31 findings addressed in the fork through commit `bfd6d01`. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
+The table below records the security findings addressed in the fork. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
 
 ## Authorization and recovery limits
 
