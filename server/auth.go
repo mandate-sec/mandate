@@ -105,7 +105,9 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	hash, _, err := pg.GetSetting(authPassKey)
+	ctx, cancel := context.WithTimeout(r.Context(), sessionCheckTimeout)
+	defer cancel()
+	hash, _, err := pg.GetSettingContext(ctx, authPassKey)
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return

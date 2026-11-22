@@ -43,6 +43,32 @@ func TestAuthRejectsWhenSessionLookupStalls(t *testing.T) {
 	}
 }
 
+func TestSetupStatusTimeoutDoesNotReportUninitialized(t *testing.T) {
+	store, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.SetMaxOpenConns(1)
+	conn, err := store.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	// Release the connection eventually even if the handler loses its deadline.
+	release := time.AfterFunc(3*sessionCheckTimeout, func() { _ = conn.Close() })
+	defer release.Stop()
+	s := &Server{m: &Manager{pg: &db.DB{DB: store}}}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), "initialized") || store.Stats().WaitCount == 0 {
+		t.Fatalf("unexpected setup status during a stalled query: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAdminPasswordComparisonByteLimit(t *testing.T) {
 	password := strings.Repeat("界", 24)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
