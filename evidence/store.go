@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/internal/contextio"
 	"github.com/Autumn-27/artex/traffic"
 )
 
@@ -40,14 +41,14 @@ func hashPath(dir, hash string) (string, error) {
 	return filepath.Join(dir, "blobs", hash[:2], hash+".bin"), nil
 }
 
-func verifyFile(path, hash string, length int64) error {
+func verifyFile(ctx context.Context, path, hash string, length int64) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	h := sha256.New()
-	n, err := io.Copy(h, f)
+	n, err := contextio.Copy(ctx, h, f)
 	if err != nil {
 		return err
 	}
@@ -59,7 +60,7 @@ func verifyFile(path, hash string, length int64) error {
 
 // A new body becomes visible only after a durable write. Failed SQL commits may
 // leave unreferenced files; GC reaps those after a full day's grace period.
-func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string) (hash string, err error) {
+func (s *Store) writeBody(ctx context.Context, r io.Reader, expectedLength int64, expectedHash string) (hash string, err error) {
 	stage := filepath.Join(s.Dir, ".staging")
 	if err = os.MkdirAll(stage, 0o700); err != nil {
 		return
@@ -70,7 +71,7 @@ func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string
 	}
 	defer func() { f.Close(); os.Remove(f.Name()) }()
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), r)
+	n, err := contextio.Copy(ctx, io.MultiWriter(f, h), r)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +93,7 @@ func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string
 		return "", err
 	}
 	if _, err = os.Stat(path); err == nil {
-		if err = verifyFile(path, hash, n); err != nil {
+		if err = verifyFile(ctx, path, hash, n); err != nil {
 			return "", err
 		}
 		// Refresh the grace period for a restored but not-yet-committed body.
@@ -132,7 +133,7 @@ func (s *Store) StageFindingsExport(ctx context.Context, findings []*db.DBFindin
 			}
 		}
 		if copyBodies {
-			return s.copySnapshots(snapshots, dest)
+			return s.copySnapshots(ctx, snapshots, dest)
 		}
 		return nil
 	})
@@ -154,11 +155,11 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 		byID[ref.TrafficID] = ref
 	}
 	err = s.Traffic.ReadEvidence(ctx, ids, func(e traffic.EvidenceExchange) error {
-		rh, err := s.writeBody(e.Request, e.ReqLen, e.ReqHash)
+		rh, err := s.writeBody(ctx, e.Request, e.ReqLen, e.ReqHash)
 		if err != nil {
 			return err
 		}
-		ph, err := s.writeBody(e.Response, e.RespLen, e.RespHash)
+		ph, err := s.writeBody(ctx, e.Response, e.RespLen, e.RespHash)
 		if err != nil {
 			return err
 		}
@@ -240,6 +241,11 @@ func (s *Store) Binding(ctx context.Context, findingID, bindingID int64) (db.Fin
 
 // OpenBody may be called without holding the evidence lock; see Binding.
 func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.File, int64, error) {
+	return s.OpenBodyContext(context.Background(), snapshot, side)
+}
+
+// OpenBodyContext allows cancellation while checking the content hash.
+func (s *Store) OpenBodyContext(ctx context.Context, snapshot db.TrafficEvidenceSnapshot, side string) (*os.File, int64, error) {
 	hash, length := snapshot.ReqHash, snapshot.ReqLen
 	if side == "response" {
 		hash, length = snapshot.RespHash, snapshot.RespLen
@@ -250,7 +256,7 @@ func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.
 	if err != nil {
 		return nil, 0, err
 	}
-	if err = verifyFile(path, hash, length); err != nil {
+	if err = verifyFile(ctx, path, hash, length); err != nil {
 		return nil, 0, err
 	}
 	f, err := os.Open(path)
@@ -260,14 +266,14 @@ func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.
 // CopySnapshots is used by both report downloads and portable task archives.
 // The destination owns real copies, never links into either disposable store.
 func (s *Store) CopySnapshots(ctx context.Context, snapshots []db.TrafficEvidenceSnapshot, dest string) error {
-	return s.DB.WithEvidenceTx(ctx, func(*sql.Tx) error { return s.copySnapshots(snapshots, dest) })
+	return s.DB.WithEvidenceTx(ctx, func(*sql.Tx) error { return s.copySnapshots(ctx, snapshots, dest) })
 }
 
-func (s *Store) copySnapshots(snapshots []db.TrafficEvidenceSnapshot, dest string) error {
+func (s *Store) copySnapshots(ctx context.Context, snapshots []db.TrafficEvidenceSnapshot, dest string) error {
 	for _, v := range snapshots {
 		for _, side := range []string{"request", "response"} {
 			if err := func() error {
-				f, length, err := s.OpenBody(v, side)
+				f, length, err := s.OpenBodyContext(ctx, v, side)
 				if err != nil {
 					return err
 				}
@@ -285,15 +291,18 @@ func (s *Store) copySnapshots(snapshots []db.TrafficEvidenceSnapshot, dest strin
 				}
 				out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 				if os.IsExist(err) {
-					return verifyFile(target, hash, length)
+					return verifyFile(ctx, target, hash, length)
 				}
 				if err != nil {
 					return err
 				}
-				_, copyErr := io.Copy(out, f)
-				syncErr := out.Sync()
-				closeErr := out.Close()
-				return errors.Join(copyErr, syncErr, closeErr)
+				if _, err = contextio.Copy(ctx, out, f); err == nil {
+					err = out.Sync()
+				}
+				if err = errors.Join(err, out.Close()); err != nil {
+					return errors.Join(err, os.Remove(target))
+				}
+				return nil
 			}(); err != nil {
 				return err
 			}
@@ -328,7 +337,7 @@ func (s *Store) WithInstalledSnapshots(ctx context.Context, snapshots []db.Traff
 						return err
 					}
 					defer f.Close()
-					_, err = s.writeBody(f, body.length, body.hash)
+					_, err = s.writeBody(ctx, f, body.length, body.hash)
 					return err
 				}(); err != nil {
 					return err

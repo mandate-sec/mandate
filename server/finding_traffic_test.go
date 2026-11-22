@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,19 @@ func TestFindingsExportRejectsUnsupportedFormatBeforeLookups(t *testing.T) {
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "bad format") {
 			t.Errorf("format %q returned %d: %s", format, w.Code, w.Body)
 		}
+	}
+}
+
+func TestFindingsZipDoesNotCreateFileAfterCancellation(t *testing.T) {
+	stage := t.TempDir()
+	path := filepath.Join(stage, "findings.zip")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := buildFindingsEvidenceZip(ctx, path, nil, stage, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no archive, got %v", err)
 	}
 }
 
