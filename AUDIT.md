@@ -1,6 +1,6 @@
 # Mandate security review
 
-This record covers 29 findings addressed in the fork through commit `162d2d6`. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
+This record covers 30 findings addressed in the fork through commit `6e08d12`. Numbers are stable references for this review. Multiple findings can share a commit, and some fixes span several commits. The count describes the scope of this review and carries no independent severity rating.
 
 ## Authorization and recovery limits
 
@@ -43,3 +43,4 @@ This record covers 29 findings addressed in the fork through commit `162d2d6`. N
 | 27 | Signing prompts could fall back to visibly echoed passphrase input | [c37a9e4](https://github.com/mandate-sec/mandate/commit/c37a9e4e8370f34eeddbcaa696cd6af795e3dbc7) |
 | 28 | An offline reviewer grant could be reused for a differently named engagement with matching signer and scope | [7be31ea](https://github.com/mandate-sec/mandate/commit/7be31ead88f8c3d3fd4be03e659dc8843dccc0f1) |
 | 29 | Global proxy validation errors and startup logs could disclose credentials embedded in a rejected proxy URL | [162d2d6](https://github.com/mandate-sec/mandate/commit/162d2d68f79d90b9fac623519270d0b6e2c2d2c6) |
+| 30 | Database startup errors could expose passwords from malformed PostgreSQL connection strings or URL query parameters | [6e08d12](https://github.com/mandate-sec/mandate/commit/6e08d1220d4788a9c06124184304a6bd94198884) |
