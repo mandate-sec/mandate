@@ -2116,6 +2116,12 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	scope := q.Get("scope")
 	format := q.Get("format")
+	switch format {
+	case "md-single", "md-zip", "csv", "json":
+	default:
+		writeErr(w, http.StatusBadRequest, "bad format: "+format)
+		return
+	}
 
 	var ids []int64
 	var filter db.FindingFilter
@@ -2152,13 +2158,16 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stage, err := os.MkdirTemp("", "artex-finding-export-")
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
+	var stage string
+	if format == "md-zip" {
+		stage, err = os.MkdirTemp("", "artex-finding-export-")
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		defer os.RemoveAll(stage)
 	}
-	defer os.RemoveAll(stage)
-	if err = s.evidenceStore().StageFindingsExport(r.Context(), fs, stage, format == "md-zip"); err != nil {
+	if err = s.evidenceStore().StageFindingsExport(r.Context(), fs, stage, stage != ""); err != nil {
 		evidenceError(w, err)
 		return
 	}
@@ -2204,8 +2213,6 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
-	default:
-		writeErr(w, 400, "bad format: "+format)
 	}
 }
 

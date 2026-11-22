@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -19,6 +20,18 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/traffic"
 )
+
+func TestFindingsExportRejectsUnsupportedFormatBeforeLookups(t *testing.T) {
+	server := &Server{}
+	for _, format := range []string{"", "pdf"} {
+		r := httptest.NewRequest(http.MethodGet, "/api/exploration/findings/export?scope=all&format="+format, nil)
+		w := httptest.NewRecorder()
+		server.findingsExport(w, r)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "bad format") {
+			t.Errorf("format %q returned %d: %s", format, w.Code, w.Body)
+		}
+	}
+}
 
 func trafficEvidenceServer(t *testing.T) (*Server, *db.RecordedFinding, func(string, string, string) *httptest.ResponseRecorder) {
 	t.Helper()
