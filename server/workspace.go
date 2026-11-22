@@ -3,9 +3,9 @@ package server
 import (
 	"bytes"
 	"io"
-	"mime/multipart"
+	"io/fs"
+	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,28 +23,13 @@ const (
 	maxWorkspaceUpload = 512 << 20 // 512 MiB per upload request
 )
 
-// wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
-// dir. It returns ok=false if the path would escape the root. filepath.Clean on a
-// rooted copy collapses any ".." so nothing can climb above the root.
-func (s *Server) wsResolve(rel string) (string, bool) {
-	base := filepath.Clean(s.m.dir)
-	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
-	clean := filepath.Clean("/" + rel) // e.g. "/a/../../etc" → "/etc" (still rooted at "/")
-	abs := filepath.Clean(filepath.Join(base, clean))
-	if abs != base && !strings.HasPrefix(abs, base+string(os.PathSeparator)) {
-		return "", false
+func (s *Server) workspaceRoot(w http.ResponseWriter) *os.Root {
+	root, err := os.OpenRoot(s.m.dir)
+	if err != nil {
+		writeErr(w, 500, "Workspace unavailable")
+		return nil
 	}
-	return abs, true
-}
-
-// wsRel renders an absolute path back as a workspace-relative path (forward slashes).
-func (s *Server) wsRel(abs string) string {
-	base := filepath.Clean(s.m.dir)
-	rel, err := filepath.Rel(base, abs)
-	if err != nil || rel == "." {
-		return ""
-	}
-	return filepath.ToSlash(rel)
+	return root
 }
 
 type wsEntry struct {
@@ -57,12 +42,17 @@ type wsEntry struct {
 
 // GET /api/workspace/list?path=<rel>
 func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	name, ok := workspacePath(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	fi, err := os.Stat(abs)
+	fi, err := root.Stat(name)
 	if err != nil {
 		writeErr(w, 404, "路径不存在")
 		return
@@ -71,7 +61,7 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "不是目录")
 		return
 	}
-	ents, err := os.ReadDir(abs)
+	ents, err := fs.ReadDir(root.FS(), filepath.ToSlash(name))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -84,7 +74,7 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, wsEntry{
 			Name:  e.Name(),
-			Path:  s.wsRel(filepath.Join(abs, e.Name())),
+			Path:  workspaceDisplay(filepath.Join(name, e.Name())),
 			Dir:   e.IsDir(),
 			Size:  info.Size(),
 			MTime: info.ModTime().UnixMilli(),
@@ -97,44 +87,65 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 		}
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
-	writeJSON(w, 200, map[string]any{"path": s.wsRel(abs), "entries": out})
+	writeJSON(w, 200, map[string]any{"path": workspaceDisplay(name), "entries": out})
 }
 
 // GET /api/workspace/read?path=<rel> — inline text for view/edit. Binary or oversize
 // files return {binary:true}/{too_large:true} with no content (use download instead).
 func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	name, ok := workspacePath(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	fi, err := os.Stat(abs)
+	fi, err := root.Stat(name)
 	if err != nil {
 		writeErr(w, 404, "文件不存在")
 		return
 	}
-	if fi.IsDir() {
-		writeErr(w, 400, "是目录，不能作为文件读取")
+	if !fi.Mode().IsRegular() {
+		writeErr(w, 400, "Expected a regular file")
 		return
 	}
 	if fi.Size() > maxWorkspaceRead {
-		writeJSON(w, 200, map[string]any{"path": s.wsRel(abs), "size": fi.Size(), "too_large": true, "binary": true})
+		writeJSON(w, 200, map[string]any{"path": workspaceDisplay(name), "size": fi.Size(), "too_large": true, "binary": true})
 		return
 	}
-	data, err := os.ReadFile(abs)
+	file, err := root.Open(name)
+	if err != nil {
+		writeErr(w, 404, "File unavailable")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxWorkspaceRead+1))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
-		writeJSON(w, 200, map[string]any{"path": s.wsRel(abs), "size": fi.Size(), "binary": true})
+	if len(data) > maxWorkspaceRead {
+		writeJSON(w, 200, map[string]any{"path": workspaceDisplay(name), "size": len(data), "too_large": true, "binary": true})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"path": s.wsRel(abs), "size": fi.Size(), "binary": false, "content": string(data)})
+	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		writeJSON(w, 200, map[string]any{"path": workspaceDisplay(name), "size": fi.Size(), "binary": true})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"path": workspaceDisplay(name), "size": fi.Size(), "binary": false, "content": string(data)})
 }
 
 // POST /api/workspace/write  {path, content} — create/overwrite a text file.
 func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 6*maxWorkspaceRead+8192)
 	var req struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -143,28 +154,37 @@ func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	abs, ok := s.wsResolve(req.Path)
-	if !ok || abs == filepath.Clean(s.m.dir) {
+	if len(req.Content) > maxWorkspaceRead {
+		writeErr(w, 413, "File exceeds editor size limit")
+		return
+	}
+	name, ok := workspacePath(req.Path)
+	if !ok || name == "." {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
+	if fi, err := root.Stat(name); err == nil && fi.IsDir() {
 		writeErr(w, 400, "目标是目录")
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if err := os.WriteFile(abs, []byte(req.Content), 0o644); err != nil {
+	if err := replaceWorkspaceFile(root, name, strings.NewReader(req.Content)); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "path": s.wsRel(abs)})
+	writeJSON(w, 200, map[string]any{"ok": true, "path": workspaceDisplay(name)})
 }
 
 // POST /api/workspace/mkdir  {path}
 func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -172,35 +192,40 @@ func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	abs, ok := s.wsResolve(req.Path)
-	if !ok || abs == filepath.Clean(s.m.dir) {
+	name, ok := workspacePath(req.Path)
+	if !ok || name == "." {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := root.MkdirAll(name, 0o755); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "path": s.wsRel(abs)})
+	writeJSON(w, 200, map[string]any{"ok": true, "path": workspaceDisplay(name)})
 }
 
 // DELETE /api/workspace/delete?path=<rel> — removes a file or a directory tree
 // (confined to the work dir; the root itself can't be deleted).
 func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	name, ok := workspacePath(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	if abs == filepath.Clean(s.m.dir) {
+	if name == "." {
 		writeErr(w, 400, "不能删除工作区根目录")
 		return
 	}
-	if _, err := os.Stat(abs); err != nil {
+	if _, err := root.Lstat(name); err != nil {
 		writeErr(w, 404, "路径不存在")
 		return
 	}
-	if err := os.RemoveAll(abs); err != nil {
+	if err := root.RemoveAll(name); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -209,30 +234,51 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/workspace/download?path=<rel> — stream a file as an attachment.
 func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
-	abs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	name, ok := workspacePath(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	fi, err := os.Stat(abs)
-	if err != nil || fi.IsDir() {
-		writeErr(w, 404, "文件不存在")
+	fi, err := root.Stat(name)
+	if err != nil || !fi.Mode().IsRegular() {
+		writeErr(w, 404, "File unavailable")
 		return
 	}
-	name := filepath.Base(abs)
-	// RFC 5987 filename* keeps non-ASCII names intact; plain filename is the fallback.
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeFilename(name)+"\"; filename*=UTF-8''"+url.PathEscape(name))
-	http.ServeFile(w, r, abs)
+	file, err := root.Open(name)
+	if err != nil {
+		writeErr(w, 404, "File unavailable")
+		return
+	}
+	defer file.Close()
+	fi, err = file.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		writeErr(w, 404, "File unavailable")
+		return
+	}
+	name = filepath.Base(name)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	http.ServeContent(w, r, name, fi.ModTime(), file)
 }
 
 // POST /api/workspace/upload?path=<dir> — multipart form field "file" (one or more).
 func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
-	dirAbs, ok := s.wsResolve(r.URL.Query().Get("path"))
+	root := s.workspaceRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	dirName, ok := workspacePath(r.URL.Query().Get("path"))
 	if !ok {
 		writeErr(w, 400, "非法路径")
 		return
 	}
-	if fi, err := os.Stat(dirAbs); err != nil || !fi.IsDir() {
+	if fi, err := root.Stat(dirName); err != nil || !fi.IsDir() {
 		writeErr(w, 400, "目标目录不存在")
 		return
 	}
@@ -252,39 +298,15 @@ func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 		if name == "" || name == "." || name == ".." {
 			continue
 		}
-		destAbs, okd := s.wsResolve(filepath.Join(s.wsRel(dirAbs), name))
+		dest, okd := workspacePath(filepath.Join(workspaceDisplay(dirName), name))
 		if !okd {
 			continue
 		}
-		if err := saveUpload(hdr, destAbs); err != nil {
+		if err := saveUpload(root, hdr, dest, os.O_TRUNC); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
 		saved++
 	}
 	writeJSON(w, 200, map[string]any{"uploaded": saved})
-}
-
-func saveUpload(hdr *multipart.FileHeader, dest string) error {
-	src, err := hdr.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, src)
-	return err
-}
-
-// sanitizeFilename strips characters unsafe for a Content-Disposition filename token.
-func sanitizeFilename(name string) string {
-	name = strings.ReplaceAll(name, "\"", "")
-	name = strings.ReplaceAll(name, "\\", "")
-	name = strings.ReplaceAll(name, "\n", "")
-	name = strings.ReplaceAll(name, "\r", "")
-	return name
 }

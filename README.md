@@ -24,6 +24,10 @@ The console defaults to `127.0.0.1:8787` and the recording proxy to `127.0.0.1:8
 
 The bundled console uses same-origin cookies for event streams. Session tokens in URL query parameters are rejected. During local UI development, use the same hostname for both ports and set `MANDATE_STREAM_UI_ORIGIN` on the backend to the exact frontend origin (for example, `http://localhost:3000`). This grants that origin credentialed read access. Prefer same-origin routing in production. When upgrading, treat earlier access logs containing session URLs as sensitive until those sessions expire.
 
+## Workspace files
+
+The console file manager and chat upload handler use filesystem operations rooted in the configured workspace. Workspace downloads use a binary attachment response. Editor saves replace the destination after the full content arrives. Keep the workspace on a dedicated volume when untrusted processes can create files there. Mounted directories and preexisting hard links can expose data that already appears inside the workspace.
+
 ## Upstream documentation
 
 <p align="center">
