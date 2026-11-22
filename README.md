@@ -175,13 +175,13 @@ docker compose --env-file .env.safe -f docker-compose.safe.yml ps
 docker compose --env-file .env.safe -f docker-compose.safe.yml logs -f artex
 ```
 
-Stop without deleting data:
+Run `make down` or `make clean` to remove the containers and keep the database, workspace files, and session signing key. The equivalent Compose command is below.
 
 ```bash
 docker compose --env-file .env.safe -f docker-compose.safe.yml down
 ```
 
-Delete everything, including the database and ARTEX data:
+To deliberately erase the database, workspace files, and session signing key, run the following command. Recovery requires a backup.
 
 ```bash
 docker compose --env-file .env.safe -f docker-compose.safe.yml down -v

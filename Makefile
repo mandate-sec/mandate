@@ -53,5 +53,4 @@ e2e:
 	@test -n "$(ARTEX_PG_DSN)" || { echo "ARTEX_PG_DSN is required (empty test database)" >&2; exit 1; }
 	python3 ci/e2e_binary.py ./artex
 
-clean:
-	$(COMPOSE) down -v
+clean: down
