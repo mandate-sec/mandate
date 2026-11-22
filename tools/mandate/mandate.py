@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import unicodedata
 from datetime import date, datetime, timezone
 
 from cryptography.exceptions import InvalidSignature
@@ -17,6 +18,7 @@ from cryptography.hazmat.primitives import serialization as ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 KEYS = Path.home() / ".mandate" / "keys"
+MAX_RECORD_BYTES = 1024 * 1024
 CHECKS = {"port_scan", "web_scan", "auth_bypass", "vuln_scan", "browser_capture"}
 
 
@@ -41,6 +43,8 @@ def exact(obj, fields):
 def timestamp(value):
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", value):
         raise ValueError("expected RFC3339 timestamp with timezone")
+    if value[-1] != "Z" and (int(value[-5:-3]) > 23 or int(value[-2:]) > 59):
+        raise ValueError("invalid timezone offset")
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
@@ -52,9 +56,13 @@ def expiry(value):
 
 
 def target(value):
+    if "%" in value:
+        raise ValueError("scope identifiers are not allowed in addresses")
     try:
         ipaddress.ip_network(value, strict=True)
     except ValueError:
+        if re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+))*", value):
+            raise ValueError("ambiguous numeric address")
         if len(value) > 253 or not all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in value.split(".")):
             raise ValueError("invalid hostname or network: " + value)
 
@@ -65,7 +73,9 @@ def validate(obj, now, allow_expired=False):
     exact(a, "name email key_fingerprint")
     exact(s, "targets checks excluded")
     exact(c, "no_dos no_social_engineering max_concurrency")
-    if not all(isinstance(v, str) and v.strip() for v in [obj["engagement"], *a.values()]):
+    if not all(isinstance(v, str) and v.strip() and not any(
+        unicodedata.category(ch) in {"Cc", "Cf", "Cs", "Zl", "Zp"} for ch in v
+    ) for v in [obj["engagement"], *a.values()]):
         raise ValueError("missing engagement or signer identity")
     for k, items in s.items():
         if not isinstance(items, list) or any(not isinstance(v, str) or not v for v in items):
@@ -93,14 +103,21 @@ def write_new(path, data):
 
 def signed(obj, key):
     signature = base64.b64encode(key.sign(canonical(obj))).decode()
-    return canonical(dict(obj, signature=signature)) + b"\n"
+    data = canonical(dict(obj, signature=signature)) + b"\n"
+    if len(data) > MAX_RECORD_BYTES:
+        raise ValueError("mandate exceeds size limit")
+    return data
 
 
 def verify(path, key_path, now, allow_expired=False):
     key = ser.load_pem_public_key(key_path.read_bytes())
     if not isinstance(key, Ed25519PublicKey):
         raise ValueError("expected Ed25519 trusted key")
-    obj = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_RECORD_BYTES + 1)
+    if len(raw) > MAX_RECORD_BYTES:
+        raise ValueError("mandate exceeds size limit")
+    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(obj, dict) or "signature" not in obj:
         raise ValueError("missing signature")
     sig = base64.b64decode(obj.pop("signature"), validate=True)
@@ -145,7 +162,7 @@ def main():
         return
     if args.cmd == "verify":
         obj = verify(args.file, args.trusted_key, now)
-        print("Valid:", obj["engagement"], "until", obj["expires"])
+        print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
         return
     key = ser.load_pem_private_key(args.key.read_bytes(), getpass.getpass("Signing passphrase: ").encode())
     if not isinstance(key, Ed25519PrivateKey):
@@ -169,18 +186,22 @@ def main():
     if args.cmd == "create":
         write_new(args.file, data)
     else:
-        with tempfile.NamedTemporaryFile(dir=args.file.parent, delete=False) as f:
-            tmp = Path(f.name)
+        tmp = None
         try:
-            tmp.write_bytes(data)
+            with tempfile.NamedTemporaryFile(dir=args.file.parent, delete=False) as f:
+                tmp = Path(f.name)
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
             tmp.replace(args.file)
         finally:
-            tmp.unlink(missing_ok=True)
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
     print(args.file)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, TypeError, InvalidSignature) as exc:
+    except (OSError, ValueError, TypeError, RecursionError, InvalidSignature) as exc:
         sys.exit("Mandate rejected: " + (str(exc) or type(exc).__name__))
