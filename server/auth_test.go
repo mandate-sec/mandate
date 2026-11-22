@@ -2,10 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
@@ -134,5 +137,28 @@ func TestAuthEndpointsRejectInvalidBodiesBeforeDatabase(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader("{}" + strings.Repeat(" ", 8190)))
 	if !readAuthRequest(w, r, &struct{}{}) {
 		t.Fatal("valid document exactly at the limit was rejected")
+	}
+}
+
+type authDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (w *authDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestAuthBodyReadDeadline(t *testing.T) {
+	start := time.Now()
+	w := &authDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Body = io.NopCloser(iotest.ErrReader(os.ErrDeadlineExceeded))
+	if readAuthRequest(w, r, &struct{}{}) || w.Code != http.StatusRequestTimeout {
+		t.Fatalf("expired body accepted or wrong status: %d", w.Code)
+	}
+	if w.deadline.Before(start.Add(10*time.Second)) || w.deadline.After(time.Now().Add(10*time.Second)) {
+		t.Fatalf("unexpected read deadline: %v", w.deadline)
 	}
 }

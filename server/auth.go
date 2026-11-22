@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -113,7 +114,19 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 // cannot be hidden behind a valid first JSON value.
 func readAuthRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 	const limit = 8192
+	// ReadHeaderTimeout ends before the body. Limit only the authentication
+	// request here so uploads and long-lived response streams keep their policy.
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		writeErr(w, http.StatusServiceUnavailable, "请求暂时不可用")
+		return false
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		writeErr(w, http.StatusRequestTimeout, "请求超时")
+		return false
+	}
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		writeErr(w, http.StatusRequestEntityTooLarge, "请求体过大")
