@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { api, openEventStream } from "@/lib/api";
+import { api, fetchConsoleAPI, openEventStream } from "@/lib/api";
 import { externalWebLink } from "@/lib/external-link";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
 
@@ -83,7 +83,7 @@ export function UpdateCard() {
     while (Date.now() < deadline) {
       await sleep(2000);
       try {
-        const r = await fetch("/api/health", { cache: "no-store" });
+        const r = await fetchConsoleAPI("/api/health", { cache: "no-store" });
         if (r.ok) {
           const j = (await r.json()) as { version?: string };
           if (j.version && j.version !== fromVersion) {
