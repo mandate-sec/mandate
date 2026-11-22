@@ -38,8 +38,8 @@ def unique(pairs):
     return obj
 
 
-def exact(obj, fields):
-    if not isinstance(obj, dict) or set(obj) != set(fields.split()):
+def exact(obj, fields, optional=""):
+    if not isinstance(obj, dict) or set(obj) - set(optional.split()) != set(fields.split()):
         raise ValueError("expected fields: " + fields)
 
 
@@ -75,7 +75,7 @@ def target(value):
             raise ValueError("invalid hostname or network: " + value)
 
 
-def validate(obj, now, allow_expired=False):
+def validate(obj, now, allow_expired=False, *, allow_pending=False):
     exact(obj, "engagement authorized_by scope constraints valid_from expires")
     a, s, c = obj["authorized_by"], obj["scope"], obj["constraints"]
     exact(a, "name email key_fingerprint")
@@ -94,13 +94,13 @@ def validate(obj, now, allow_expired=False):
         target(v)
     if c["no_dos"] is not True or c["no_social_engineering"] is not True or type(c["max_concurrency"]) is not int or not 1 <= c["max_concurrency"] <= 10:
         raise ValueError("invalid constraints")
-    check_window(obj, now, allow_expired)
+    check_window(obj, now, allow_expired, allow_pending=allow_pending)
 
 
-def check_window(obj, now=None, allow_expired=False):
+def check_window(obj, now=None, allow_expired=False, *, allow_pending=False):
     start, end = timestamp(obj["valid_from"]), timestamp(obj["expires"])
     current = (now if now is not None else datetime.now(timezone.utc), "")
-    if start >= end or current < start or (not allow_expired and current >= end):
+    if start >= end or (not allow_pending and current < start) or (not allow_expired and current >= end):
         raise ValueError("mandate outside validity window")
 
 
@@ -185,14 +185,20 @@ def check_approval(obj, path):
     """Compare a verified record with a grant provisioned by its reviewer."""
     raw = read_regular_file(path, 65536, "approval exceeds 64 KiB")
     grant = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
-    fields = "engagement key_fingerprint targets checks max_concurrency expires"
-    exact(grant, fields + " excluded" if isinstance(grant, dict) and "excluded" in grant else fields)
+    exact(grant, "engagement key_fingerprint targets checks max_concurrency expires", optional="excluded valid_from")
     if grant["engagement"] != obj["engagement"]:
         raise ValueError("approval is for a different engagement")
     if grant["key_fingerprint"] != obj["authorized_by"]["key_fingerprint"]:
         raise ValueError("approval is for a different signer")
-    if timestamp(obj["expires"]) > timestamp(grant["expires"]):
+    grant_end = timestamp(grant["expires"])
+    if timestamp(obj["expires"]) > grant_end:
         raise ValueError("record outlasts the approval")
+    if "valid_from" in grant:
+        grant_start = timestamp(grant["valid_from"])
+        if grant_start >= grant_end:
+            raise ValueError("empty approval validity window")
+        if timestamp(obj["valid_from"]) < grant_start:
+            raise ValueError("record starts before approval")
     limit = grant["max_concurrency"]
     if type(limit) is not int or not 1 <= obj["constraints"]["max_concurrency"] <= limit <= 10:
         raise ValueError("concurrency outside approval")
@@ -270,6 +276,7 @@ def main():
                 p.add_argument("--" + field, required=True)
             p.add_argument("--excluded", default="")
             p.add_argument("--max-concurrency", type=int, default=1)
+            p.add_argument("--valid-from", help="RFC3339 start time (default: now)")
     args = parser.parse_args()
     if args.cmd == "keygen":
         if args.key.exists() or args.trusted_key.exists() or args.key.resolve() == args.trusted_key.resolve():
@@ -305,15 +312,18 @@ def main():
         if timestamp(expiry(args.expires)) <= timestamp(obj["expires"]):
             raise ValueError("renewal must extend the expiry")
     else:
+        issued_at = datetime.now(timezone.utc)
+        if args.valid_from is not None and timestamp(args.valid_from) < (issued_at, ""):
+            raise ValueError("scheduled start must not precede issuance")
         obj = dict(engagement=args.engagement, authorized_by=dict(name=args.name, email=args.email, key_fingerprint=fp),
                    scope=dict(targets=args.targets.split(","), checks=args.checks.split(","), excluded=args.excluded.split(",") if args.excluded else []),
                    constraints=dict(no_dos=True, no_social_engineering=True, max_concurrency=args.max_concurrency),
-                   valid_from=datetime.now(timezone.utc).isoformat())
+                   valid_from=args.valid_from if args.valid_from is not None else issued_at.isoformat())
     obj["expires"] = expiry(args.expires)
-    validate(obj, None)
+    validate(obj, None, allow_pending=args.cmd == "create")
     data = signed(obj, key)
     if args.cmd == "create":
-        check_window(obj)
+        check_window(obj, allow_pending=True)
         write_new(args.file, data)
     else:
         tmp = None

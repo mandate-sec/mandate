@@ -32,6 +32,7 @@ The reviewer keeps one grant per signer and engagement under administrator-contr
   "checks": ["web_scan"],
   "excluded": ["192.0.2.9", "auth_bypass"],
   "max_concurrency": 1,
+  "valid_from": "2026-12-01T00:00:00Z",
   "expires": "2026-12-05T00:00:00Z"
 }
 ```
@@ -41,5 +42,7 @@ The engagement name must match the signed record exactly, including capitalizati
 Run `python mandate.py verify --file engagement.json --trusted-key approved/owner.pub --approval approved/staging.json`. The check accepts exact hostnames case-insensitively and IPs or subnets contained in an approved network of the same address family. Write networks using a decimal prefix length, such as `192.0.2.0/24`. Verification rejects dotted netmasks, wildcard masks, and zero-padded prefixes in grants and signed records. For an older record using those forms, confirm the intended range with the owner and issue a replacement. It performs no DNS lookups. Every requested target and check must fit, even if the record includes exclusions. The record must also fit the concurrency ceiling and expiry. Use this check only for permission that can be represented by these fields. Review other contractual restrictions separately.
 
 The optional `excluded` list in a grant names targets and check types that must also appear in the signed record’s `scope.excluded` list. Equivalent IP or CIDR spellings and hostname capitalization are accepted. The signer can add narrower limits by listing additional exclusions. Grants created without this field continue to work.
+
+Set `valid_from` to an RFC3339 timestamp when a grant has an earliest approved start. The signed record must start at or after that instant and expire by the grant’s `expires` time. Signers can prepare it in advance with `create --valid-from 2026-12-01T00:00:00Z`. Choose a scheduled start at or after issuance. Verification still rejects it before the signed start time. By default, new records start at issuance, and grants without `valid_from` only cap the record’s expiry.
 
 The reviewer can withdraw a grant by removing it from the trusted configuration. There is no revocation service or runtime action gate. If a signing key is compromised, stop accepting its public key on each reviewing machine and distribute a newly approved key independently. Copies of the old record will still verify wherever the old key is trusted until they expire.

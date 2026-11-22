@@ -23,13 +23,22 @@ class Records(unittest.TestCase):
                 "--excluded", "Monitoring.Example,2001:db8::1,auth_bypass")
             run("verify")
             grant = root / "approval.json"
-            approval = dict(engagement="local", key_fingerprint=json.loads(record.read_text())["authorized_by"]["key_fingerprint"],
+            saved = json.loads(record.read_text())
+            approval = dict(engagement="local", key_fingerprint=saved["authorized_by"]["key_fingerprint"],
                             targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
             grant.write_text(json.dumps(approval))
             run("verify", "--approval", str(grant))
             excludes = ["monitoring.example", "2001:0db8:0:0:0:0:0:1/128", "auth_bypass"]
-            grant.write_text(json.dumps(approval | {"excluded": excludes}))
+            record_start = datetime.fromisoformat(saved["valid_from"])
+            equivalent_start = record_start.astimezone(timezone(timedelta(hours=2))).isoformat()
+            grant.write_text(json.dumps(approval | {"excluded": excludes, "valid_from": equivalent_start}))
             run("verify", "--approval", str(grant))
+            grant.write_text(json.dumps(approval | {"valid_from": (record_start + timedelta(seconds=1)).isoformat()}))
+            with self.assertRaisesRegex(ValueError, "starts before approval"):
+                run("verify", "--approval", str(grant))
+            grant.write_text(json.dumps(approval | {"valid_from": expiry}))
+            with self.assertRaisesRegex(ValueError, "empty approval validity window"):
+                run("verify", "--approval", str(grant))
             grant.write_text(json.dumps(approval | {"excluded": excludes + ["private.example"]}))
             with self.assertRaisesRegex(ValueError, "required exclusion"):
                 run("verify", "--approval", str(grant))
@@ -68,5 +77,25 @@ class Records(unittest.TestCase):
             data=json.loads(record.read_text()); data["scope"]["targets"]=["other.example"]
             record.write_text(json.dumps(data))
             with self.assertRaises(mandate.InvalidSignature): run("verify")
+
+            record = root / "scheduled"
+            start = now + timedelta(days=1)
+            end = start + timedelta(days=1)
+            create_args = ("--engagement", "local", "--targets", "localhost", "--checks", "web_scan",
+                           "--name", "Local", "--email", "local@example.org")
+            with self.assertRaisesRegex(ValueError, "precede issuance"):
+                run("create", *create_args, "--valid-from", (now - timedelta(days=1)).isoformat(), "--expires", end.isoformat())
+            scheduled_args = (*create_args, "--valid-from", start.isoformat())
+            with self.assertRaisesRegex(ValueError, "validity window"):
+                run("create", *scheduled_args, "--expires", start.isoformat())
+            self.assertFalse(record.exists())
+            run("create", *scheduled_args, "--expires", end.isoformat())
+            with self.assertRaisesRegex(ValueError, "validity window"):
+                run("verify")
+            accepted = mandate.verify(record, public, start)
+            grant.write_text(json.dumps(approval | {"valid_from": start.isoformat(), "expires": end.isoformat()}))
+            mandate.check_approval(accepted, grant)
+            with self.assertRaisesRegex(ValueError, "validity window"):
+                mandate.verify(record, public, end)
 
 if __name__=="__main__":unittest.main()
