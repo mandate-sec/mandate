@@ -123,6 +123,10 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	}
 	hc := &http.Client{CheckRedirect: checkMCPRedirect} // the SSE stream is intentionally long-lived.
 	streamCtx, cancel := context.WithCancel(context.Background())
+	handshakeCtx, finishHandshake := context.WithTimeout(ctx, 120*time.Second)
+	defer finishHandshake()
+	detach := context.AfterFunc(handshakeCtx, cancel)
+	defer detach()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, sseURL, nil)
 	if err != nil {
 		cancel()
@@ -164,19 +168,25 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 		protocol:     legacySSEProtocolVersion,
 	}
 	go c.readLegacySSE(reader)
-	if err := c.initialize(ctx); err != nil {
+	if err := c.initialize(handshakeCtx); err != nil {
 		_ = c.Close()
 		return nil, err
+	}
+	if !detach() {
+		_ = c.Close()
+		return nil, handshakeCtx.Err()
 	}
 	return c, nil
 }
 
 func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
+	remaining := 64 << 10
 	for {
-		line, err := r.ReadString('\n')
+		line, err := boundedSSELine(r, remaining)
 		if err != nil {
 			return "", fmt.Errorf("mcp sse endpoint: %w", err)
 		}
+		remaining -= len(line)
 		line = strings.TrimRight(line, "\r\n")
 		if !strings.HasPrefix(line, "data:") {
 			continue
@@ -202,8 +212,9 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 
 func (c *Client) readLegacySSE(r *bufio.Reader) {
 	defer close(c.streamDone)
+	defer c.streamCancel()
 	for {
-		line, err := r.ReadString('\n')
+		line, err := boundedSSELine(r, maxMCPResponseBytes)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				select {
@@ -461,11 +472,7 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		return parseSSE(resp.Body, body.ID)
 	}
-	var out rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("mcp: decode json response: %w", err)
-	}
-	return &out, nil
+	return decodeRPCResponse(resp.Body)
 }
 
 // legacyRoundTrip posts to the endpoint announced by GET /sse. The HTTP POST
@@ -526,7 +533,7 @@ func (c *Client) legacyRoundTrip(ctx context.Context, body rpcRequest, expectRes
 // response matching wantID (server-to-client requests/notifications are skipped).
 func parseSSE(r io.Reader, wantID int) (*rpcResponse, error) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), maxMCPResponseBytes)
 	var dataBuf strings.Builder
 	flush := func() (*rpcResponse, bool) {
 		if dataBuf.Len() == 0 {
@@ -552,14 +559,18 @@ func parseSSE(r io.Reader, wantID int) (*rpcResponse, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			dataBuf.WriteString(strings.TrimSpace(line[len("data:"):]))
+			data := strings.TrimSpace(line[len("data:"):])
+			if len(data) > maxMCPResponseBytes-dataBuf.Len() {
+				return nil, errMCPResponseSize
+			}
+			dataBuf.WriteString(data)
 		}
-	}
-	if resp, ok := flush(); ok {
-		return resp, nil
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if resp, ok := flush(); ok {
+		return resp, nil
 	}
 	return nil, fmt.Errorf("mcp: no matching response in event stream")
 }
