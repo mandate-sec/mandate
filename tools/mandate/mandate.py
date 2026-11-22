@@ -90,8 +90,12 @@ def validate(obj, now, allow_expired=False):
         target(v)
     if c["no_dos"] is not True or c["no_social_engineering"] is not True or type(c["max_concurrency"]) is not int or not 1 <= c["max_concurrency"] <= 10:
         raise ValueError("invalid constraints")
+    check_window(obj, now, allow_expired)
+
+
+def check_window(obj, now=None, allow_expired=False):
     start, end = timestamp(obj["valid_from"]), timestamp(obj["expires"])
-    current = (now, "")
+    current = (now if now is not None else datetime.now(timezone.utc), "")
     if start >= end or current < start or (not allow_expired and current >= end):
         raise ValueError("mandate outside validity window")
 
@@ -176,7 +180,7 @@ def check_approval(obj, path):
         raise ValueError("target outside approval: " + value)
 
 
-def verify(path, key_path, now, allow_expired=False):
+def verify(path, key_path, now=None, allow_expired=False):
     key = ser.load_pem_public_key(read_key(key_path))
     if not isinstance(key, Ed25519PublicKey):
         raise ValueError("expected Ed25519 trusted key")
@@ -215,7 +219,6 @@ def main():
             p.add_argument("--excluded", default="")
             p.add_argument("--max-concurrency", type=int, default=1)
     args = parser.parse_args()
-    now = datetime.now(timezone.utc)
     if args.cmd == "keygen":
         if args.key.exists() or args.trusted_key.exists() or args.key.resolve() == args.trusted_key.resolve():
             raise ValueError("choose unused, distinct key paths")
@@ -230,9 +233,10 @@ def main():
         print(fingerprint(key.public_key()))
         return
     if args.cmd == "verify":
-        obj = verify(args.file, args.trusted_key, now)
+        obj = verify(args.file, args.trusted_key)
         if args.approval is not None:
             check_approval(obj, args.approval)
+            check_window(obj)
             print("Signed record fits the selected approval:", obj["engagement"], "until", obj["expires"])
             return
         print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
@@ -245,18 +249,19 @@ def main():
     if not isinstance(trusted, Ed25519PublicKey) or fingerprint(trusted) != fp:
         raise ValueError("signing key does not match trusted key")
     if args.cmd == "renew":
-        obj = verify(args.file, args.trusted_key, now, allow_expired=True)
+        obj = verify(args.file, args.trusted_key, allow_expired=True)
         if timestamp(expiry(args.expires)) <= timestamp(obj["expires"]):
             raise ValueError("renewal must extend the expiry")
     else:
         obj = dict(engagement=args.engagement, authorized_by=dict(name=args.name, email=args.email, key_fingerprint=fp),
                    scope=dict(targets=args.targets.split(","), checks=args.checks.split(","), excluded=args.excluded.split(",") if args.excluded else []),
                    constraints=dict(no_dos=True, no_social_engineering=True, max_concurrency=args.max_concurrency),
-                   valid_from=now.isoformat())
+                   valid_from=datetime.now(timezone.utc).isoformat())
     obj["expires"] = expiry(args.expires)
-    validate(obj, now)
+    validate(obj, None)
     data = signed(obj, key)
     if args.cmd == "create":
+        check_window(obj)
         write_new(args.file, data)
     else:
         tmp = None
@@ -266,6 +271,7 @@ def main():
                 f.write(data)
                 f.flush()
                 os.fsync(f.fileno())
+            check_window(obj)
             tmp.replace(args.file)
         finally:
             if tmp is not None:

@@ -26,6 +26,21 @@ class Records(unittest.TestCase):
                             targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
             grant.write_text(json.dumps(approval))
             run("verify", "--approval", str(grant))
+            # Model a grant read that finishes exactly when the record expires.
+            class Clock(datetime):
+                @classmethod
+                def now(cls, tz):
+                    return cls.current.astimezone(tz)
+
+            Clock.current = now + timedelta(hours=1)
+            original_check = mandate.check_approval
+            def delayed_approval(obj, path):
+                original_check(obj, path)
+                Clock.current = datetime.fromisoformat(expiry)
+
+            with patch.object(mandate, "datetime", Clock), patch.object(mandate, "check_approval", delayed_approval):
+                with self.assertRaisesRegex(ValueError, "validity window"):
+                    run("verify", "--approval", str(grant))
             for change in ({"targets": ["other.example"]}, {"checks": []}, {"max_concurrency": True},
                            {"key_fingerprint": "other"}, {"expires": now.isoformat()}):
                 with self.subTest(change=change):
