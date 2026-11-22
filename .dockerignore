@@ -16,3 +16,9 @@ dist
 .env.safe.local
 .env.safe.example
 artex
+# Local engagement records and private signing keys
+**/mandate.json
+**/*.pem
+**/*.key
+**/keys/
+**/config.json

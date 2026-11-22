@@ -16,3 +16,7 @@ server/webui/dist/
 config.json
 keys/
 *.key
+
+# Local engagement records and private signing keys
+mandate.json
+*.pem
