@@ -69,6 +69,34 @@ class VerifyEvidenceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify_evidence.verify_archive(make_zip([("report.md", "a"), (name, "b")]))
 
+    def test_sharing_preview_shows_counts_without_exposing_values(self):
+        entries = fixture_entries()
+        manifest_path = PREFIX + "manifest.json"
+        manifest = json.loads(entries[manifest_path])
+        manifest["snapshot"]["url"] = "https://example.test/?token=fixture-query-value"
+        head = (
+            "GET / HTTP/1.1\r\n"
+            "Authorization: [REDACTED]\r\n"
+            "Cookie: [REDACTED]\r\n\tfixture-folded-value\r\n"
+            "X-Api-Key: fixture-header-value"
+        )
+        manifest["snapshot"]["req_head"] = head
+        entries[manifest_path] = json.dumps(manifest)
+        entries[PREFIX + "request.http"] = (head + "\n\n").encode()
+
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "findings.zip"
+            archive.write_bytes(make_zip(entries.items()).getvalue())
+            result = subprocess.run(
+                [sys.executable, verify_evidence.__file__, str(archive), "--sharing-preview"],
+                check=True, capture_output=True, text=True,
+            )
+        self.assertIn("1 Markdown report(s), 4 raw HTTP body bytes", result.stdout)
+        self.assertIn("Redaction markers: authorization (1)", result.stdout)
+        self.assertIn("Headers to review: cookie (1), x-api-key (1)", result.stdout)
+        self.assertIn("Capture URLs to review: 1", result.stdout)
+        self.assertNotIn("fixture-", result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which("ssh-keygen"), "OpenSSH is unavailable")
     def test_cli_checks_trusted_signature_and_detects_markdown_change(self):
         with tempfile.TemporaryDirectory() as directory:
