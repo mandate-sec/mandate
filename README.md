@@ -101,7 +101,8 @@ runs on infrastructure you control.
   Python tools, and DNS/network tools.
 - **Evidence-backed findings.** Findings keep task/asset lineage and recorded
   HTTP evidence, generate reports, and enter a dedicated retest workflow with
-  `reproduced`, `fixed`, or `inconclusive` verdicts.
+  `reproduced`, `fixed`, or `inconclusive` verdicts. Recipients can [verify a
+  findings ZIP offline](docs/vulnerability-traffic-evidence.md#verify-a-downloaded-findings-zip).
 - **Traffic capture.** A recording proxy indexes HTTP exchanges, bodies, and
   archives; evidence binds to findings; archives export and reclaim safely.
 - **Operational controls.** Admin authentication, configurable tool
