@@ -9,6 +9,8 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -437,29 +439,21 @@ func TestChannelValidateReportsMissingFields(t *testing.T) {
 // 若把 4xx 也判成永久失败，一个启用灰名单的邮件服务器会让每条推送都在第一次
 // 尝试后落入 failed —— 而灰名单恰恰是自动重试最该发挥作用的场景。
 func TestEmailSMTPErrorClassification(t *testing.T) {
-	cases := []struct {
-		reply     string
-		permanent bool
-	}{
-		{"450 4.7.1 Greylisting in action, please come back later", false},
-		{"451 4.3.0 Temporary system failure", false},
-		{"452 4.2.2 Mailbox full", false},
-		{"550 5.1.1 User unknown", true},
-		{"553 5.1.3 Bad address syntax", true},
-		{"554 5.7.1 Relay access denied", true},
-		// 取不到应答码时按「可重试」处理：宁可多试一次，也不要把可能的瞬时
-		// 故障判死。
-		{"unexpected EOF", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		err := smtpStageError("收件人被拒", errors.New(tc.reply))
-		if got := IsPermanent(err); got != tc.permanent {
-			t.Errorf("应答 %q: 期望 permanent=%v 得到 %v", tc.reply, tc.permanent, got)
+	const private = "private-mail-response"
+	for _, code := range []int{0, 450, 451, 452, 550, 553, 554} {
+		var cause error = errors.New(private)
+		if code != 0 {
+			cause = &textproto.Error{Code: code, Msg: private}
 		}
-		// 无论怎么分类，原文都要保留给使用者排查。
-		if tc.reply != "" && !strings.Contains(err.Error(), tc.reply) {
-			t.Errorf("应答 %q 的原文被丢弃: %v", tc.reply, err)
+		err := smtpStageError("SMTP DATA", cause)
+		if strings.Contains(err.Error(), private) || !strings.Contains(err.Error(), "SMTP DATA") {
+			t.Fatalf("unexpected delivery error: %v", err)
+		}
+		if code != 0 && !strings.Contains(err.Error(), strconv.Itoa(code)) {
+			t.Fatalf("missing SMTP code %d: %v", code, err)
+		}
+		if IsPermanent(err) != (code >= 500) {
+			t.Fatalf("incorrect retry classification for %d", code)
 		}
 	}
 }

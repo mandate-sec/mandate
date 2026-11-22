@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -83,7 +84,7 @@ func (c emailChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 	if !implicitTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-				return 0, fmt.Errorf("STARTTLS 失败: %w", err)
+				return 0, smtpStageError("STARTTLS 失败", err)
 			}
 		}
 	}
@@ -92,29 +93,29 @@ func (c emailChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 			// smtp.PlainAuth 会拒绝在未加密连接上发送凭据（除非目标是 localhost）。
 			// 这是**正确**的安全行为，不能绕过，但需要把原因翻译清楚——
 			// 否则使用者只会看到「unencrypted connection」而不知道该怎么办。
-			if strings.Contains(err.Error(), "unencrypted connection") {
-				return 0, Permanent(fmt.Errorf("拒发凭据：连接未加密。请启用 TLS，或改用 465 端口(隐式 TLS)，或把「启用 TLS」勾上 (%w)", err))
+			if err.Error() == "unencrypted connection" {
+				return 0, Permanent(errors.New("拒发凭据：连接未加密。请启用 TLS。"))
 			}
-			return 0, Permanent(fmt.Errorf("SMTP 认证失败: %w", err))
+			return 0, smtpStageError("SMTP 认证失败", err)
 		}
 	}
 	if err := client.Mail(from); err != nil {
-		return 0, smtpStageError(fmt.Sprintf("发件人 %s 被拒", from), err)
+		return 0, smtpStageError("发件人被拒", err)
 	}
 	for _, rcpt := range to {
 		if err := client.Rcpt(rcpt); err != nil {
-			return 0, smtpStageError(fmt.Sprintf("收件人 %s 被拒", rcpt), err)
+			return 0, smtpStageError("收件人被拒", err)
 		}
 	}
 	w, err := client.Data()
 	if err != nil {
-		return 0, fmt.Errorf("SMTP DATA 失败: %w", err)
+		return 0, smtpStageError("SMTP DATA 失败", err)
 	}
 	if _, err := w.Write([]byte(msg)); err != nil {
-		return 0, fmt.Errorf("写入邮件正文失败: %w", err)
+		return 0, smtpStageError("写入邮件正文失败", err)
 	}
 	if err := w.Close(); err != nil {
-		return 0, fmt.Errorf("提交邮件失败: %w", err)
+		return 0, smtpStageError("提交邮件失败", err)
 	}
 	// Quit 失败不影响「邮件已被服务器接收」这个事实，因此忽略其错误。
 	_ = client.Quit()
@@ -137,21 +138,25 @@ func (c emailChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 // 用来探测端口。拨号阶段是最终生效点，也覆盖 DNS 重绑定。
 func emailDial(ctx context.Context, addr, host string, implicitTLS bool) (*smtp.Client, error) {
 	d := &net.Dialer{Timeout: emailDialTimeout, Control: blockInternalDial}
-	var conn net.Conn
-	var err error
-	if implicitTLS {
-		conn, err = tls.DialWithDialer(d, "tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
-	} else {
-		conn, err = d.DialContext(ctx, "tcp", addr)
-	}
+	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("连接 SMTP 服务器失败: %w", err)
 	}
 	_ = conn.SetDeadline(time.Now().Add(emailSessionTimeout))
+	if implicitTLS {
+		secured := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+		handshakeCtx, cancel := context.WithTimeout(ctx, emailDialTimeout)
+		defer cancel()
+		if err := secured.HandshakeContext(handshakeCtx); err != nil {
+			conn.Close()
+			return nil, errors.New("SMTP TLS 握手失败")
+		}
+		conn = secured
+	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("SMTP 握手失败: %w", err)
+		return nil, smtpStageError("SMTP 握手失败", err)
 	}
 	return client, nil
 }
@@ -165,27 +170,18 @@ func emailDial(ctx context.Context, addr, host string, implicitTLS bool) (*smtp.
 //
 // 若一律判永久失败，一个启用灰名单的邮件服务器会让**每一条**推送都在第一次
 // 尝试后落入 failed——而这类失败恰恰是自动重试最该发挥作用的场景。
-// 应答码取错误文本的前三位数字；取不到码时按可重试处理（宁可多试一次，
-// 也不要因为解析不出就把可能的瞬时故障判死）。
-func smtpStageError(what string, err error) error {
-	code := smtpReplyCode(err.Error())
-	if code >= 500 && code < 600 {
-		return Permanent(fmt.Errorf("%s: %w", what, err))
+// Only persist the local stage and the numeric SMTP reply code. Server reply
+// text and malformed protocol lines can echo credentials or message content.
+func smtpStageError(stage string, err error) error {
+	var reply *textproto.Error
+	if !errors.As(err, &reply) || reply.Code < 100 || reply.Code > 999 {
+		return errors.New(stage)
 	}
-	return fmt.Errorf("%s: %w", what, err)
-}
-
-// smtpReplyCode 从 SMTP 错误文本里取前导的三位应答码，取不到返回 0。
-// net/smtp 不导出错误码字段，只能从文本里取；格式为「450 4.7.1 ...」。
-func smtpReplyCode(text string) int {
-	if len(text) < 3 {
-		return 0
+	safe := fmt.Errorf("%s (SMTP %d)", stage, reply.Code)
+	if reply.Code >= 500 && reply.Code < 600 {
+		return Permanent(safe)
 	}
-	n, err := strconv.Atoi(text[:3])
-	if err != nil {
-		return 0
-	}
-	return n
+	return safe
 }
 
 // buildEmailMessage 组装完整的 RFC 5322 邮件。
