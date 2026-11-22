@@ -36,10 +36,17 @@ def test_dsn(name):
     return urllib.parse.urlunsplit(urllib.parse.urlsplit(admin)._replace(path='/' + name))
 
 
+def test_outcome(name, stdout):
+    # A test binary can exit successfully even when no test matched the filter.
+    records = re.findall(r'^--- (PASS|SKIP|FAIL): ' + re.escape(name) +
+                         r' \([^()\n]+\)$', stdout, re.MULTILINE)
+    return records[0] if len(records) == 1 else 'FAIL'
+
+
 packages = subprocess.check_output([
     'go', 'list', '-f', '{{.ImportPath}}|{{.Dir}}|{{len .TestGoFiles}}|{{len .XTestGoFiles}}',
     *(args.packages or ['./...'])], cwd=root, text=True).splitlines()
-summary = {'passed': [], 'failed': [], 'skipped_subtests': []}
+summary = {'passed': [], 'failed': [], 'skipped': [], 'skipped_subtests': []}
 with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
     for index, package in enumerate(packages):
         import_path, directory, internal, external = package.split('|')
@@ -67,13 +74,19 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
                 (output / (key + '.log')).write_text(log)
                 db_skipped = any(reason in log.lower() for reason in (
                     'postgres unavailable', 'no database config', 'requires isolated artex_pg_dsn'))
-                if result.returncode or db_skipped:
+                outcome = test_outcome(name, result.stdout)
+                summary['skipped_subtests'].extend(
+                    line for line in result.stdout.splitlines()
+                    if line.lstrip().startswith('--- SKIP: ' + name + '/'))
+                if result.returncode or db_skipped or outcome == 'FAIL':
                     summary['failed'].append(label)
                     print('FAIL', label, flush=True)
                     print(log[-12000:], flush=True)
+                elif outcome == 'SKIP':
+                    summary['skipped'].append(label)
+                    print('SKIP', label, flush=True)
                 else:
                     summary['passed'].append(label)
-                    summary['skipped_subtests'].extend(line for line in log.splitlines() if '--- SKIP:' in line)
                     print('PASS', label, flush=True)
             except subprocess.TimeoutExpired:
                 summary['failed'].append(label)
@@ -82,5 +95,5 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
                 database_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
 (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
 print(f'{len(summary["passed"])} passed; {len(summary["failed"])} failed; '
-      f'{len(summary["skipped_subtests"])} reported skips', flush=True)
+      f'{len(summary["skipped"])} skipped tests; {len(summary["skipped_subtests"])} skipped subtests', flush=True)
 raise SystemExit(1 if summary['failed'] else 0)
