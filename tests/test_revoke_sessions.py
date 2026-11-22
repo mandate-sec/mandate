@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -25,6 +26,24 @@ def psql(dsn, statement):
 
 @unittest.skipUnless(ADMIN and shutil.which("psql") and shutil.which(BASH), "requires a disposable PostgreSQL test cluster and Bash")
 class SessionRevocationTest(unittest.TestCase):
+    def test_unresponsive_database_connection_times_out(self):
+        with socket.socket() as listener, tempfile.TemporaryDirectory() as directory:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            config = Path(directory) / "pg_service.conf"
+            config.write_text(f"[stalled]\nhost=127.0.0.1\nport={port}\ndbname=postgres\nuser=fixture\nsslmode=disable\n",
+                              encoding="utf-8")
+            env = dict(os.environ, PGSERVICEFILE=str(config), PGCONNECT_TIMEOUT="2")
+            result = subprocess.run([BASH, "reset-password.sh", "--service", "stalled", "--revoke-sessions", "--yes"],
+                                    cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Session revocation failed", result.stderr)
+            listener.settimeout(1)
+            connection, _ = listener.accept()
+            connection.close()
+
     def test_revoke_all_without_replacing_password(self):
         admin = urlsplit(ADMIN)
         if admin.scheme not in ("postgres", "postgresql") or admin.fragment or any(

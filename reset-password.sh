@@ -222,6 +222,8 @@ SQL
 fi
 
 # ---- Execute ---------------------------------------------------------------
+# Let explicit DSN or service settings override libpq's environment default.
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 if [[ "$MODE" == "local" ]]; then
   # Connection priority: command line > --dsn/$ARTEX_PG_DSN > config.json
   if [[ -z "$SERVICE$CONFIG$DSN$HOST$USER$DBNAME" ]]; then
@@ -265,6 +267,8 @@ if [[ "$MODE" == "local" ]]; then
   if [[ "$ASSUME_YES" -ne 1 ]]; then
     read -r -p "$ACTION in this database? [y/N] " ans
     [[ "$ans" == "y" || "$ans" == "Y" ]] || die "cancelled"
+  else
+    PSQL_ARGS+=(-w)
   fi
 
   if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" psql -X "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
@@ -305,11 +309,11 @@ else
   else
     EXEC_CMD=(docker exec -i)
   fi
-  EXEC_CMD+=(-e ARTEX_RESET_NEWPASS -e PGPASSWORD -e PGUSER -e PGDATABASE "$CONTAINER" sh -c '
+  EXEC_CMD+=(-e ARTEX_RESET_NEWPASS -e PGPASSWORD -e PGUSER -e PGDATABASE -e PGCONNECT_TIMEOUT "$CONTAINER" sh -c '
     export PGUSER="${PGUSER:-${POSTGRES_USER:-artex}}"
     export PGDATABASE="${PGDATABASE:-${POSTGRES_DB:-artex}}"
     export PGPASSWORD="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
-    exec psql -X -v ON_ERROR_STOP=1 -q
+    exec psql -X -w -v ON_ERROR_STOP=1 -q
   ')
 
   if ! printf '%s\n' "$SQL" | ARTEX_RESET_NEWPASS="$NEWPASS" "${EXEC_CMD[@]}" >/dev/null; then
