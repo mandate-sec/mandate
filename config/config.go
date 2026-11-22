@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -100,13 +101,29 @@ func Path() string {
 // Load reads and parses the config file. A missing/unreadable file yields a zero
 // Config (so callers fall back to defaults) rather than an error.
 func Load() Config {
-	var c Config
-	b, err := os.ReadFile(Path())
-	if err != nil {
-		return c
-	}
-	_ = json.Unmarshal(b, &c)
+	c, _ := loadFile(Path())
 	return c
+}
+
+func loadFile(path string) (Config, error) {
+	var c Config
+	f, err := os.Open(path)
+	if err != nil {
+		return c, err
+	}
+	defer f.Close()
+	const maxBytes = 1 << 20
+	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return c, err
+	}
+	if len(b) > maxBytes {
+		return c, fmt.Errorf("configuration file %s exceeds 1 MiB", path)
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		return Config{}, fmt.Errorf("invalid configuration in %s; check JSON syntax and field types", path)
+	}
+	return c, nil
 }
 
 // SkillDir returns the skill root directory with precedence:
@@ -139,12 +156,17 @@ func PostgresDSN() (dsn, source string, err error) {
 	if v := strings.TrimSpace(os.Getenv("ARTEX_PG_DSN")); v != "" {
 		return v, "环境变量 ARTEX_PG_DSN", nil
 	}
-	db := Load().Database
+	path := Path()
+	cfg, err := loadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", "", err
+	}
+	db := cfg.Database
 	if d := strings.TrimSpace(db.DSN); d != "" {
-		return d, "配置文件 " + Path() + " (database.dsn)", nil
+		return d, "配置文件 " + path + " (database.dsn)", nil
 	}
 	if db.Host != "" || db.DBName != "" || db.User != "" {
-		return db.buildDSN(), "配置文件 " + Path() + " (database 字段)", nil
+		return db.buildDSN(), "配置文件 " + path + " (database 字段)", nil
 	}
 	return "", "", fmt.Errorf("未找到数据库配置：环境变量 ARTEX_PG_DSN 未设置，且配置文件 %s 未提供 database（dsn 或 host/user/dbname）。请创建该配置文件或设置环境变量后重试", Path())
 }

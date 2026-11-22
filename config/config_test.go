@@ -5,8 +5,30 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestInvalidConfigDoesNotSupplyPartialDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("ARTEX_CONFIG", path)
+	t.Setenv("ARTEX_PG_DSN", "")
+	for _, input := range []string{
+		`{"database":{"host":"localhost","port":"private-marker","user":"review"}}`,
+		`{"database":{"host":"localhost"}}` + strings.Repeat(" ", 1<<20),
+	} {
+		if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		dsn, _, err := PostgresDSN()
+		if err == nil || dsn != "" || strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("expected a private configuration error and no connection string")
+		}
+		if cfg := Load(); cfg != (Config{}) {
+			t.Fatal("Load returned a partially decoded configuration")
+		}
+	}
+}
 
 func TestDatabaseAddressAndCredentialRoundTrip(t *testing.T) {
 	for _, tc := range []struct{ input, host string }{
