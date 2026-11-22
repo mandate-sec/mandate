@@ -64,50 +64,56 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- Read database.* from config.json (local mode only, when no connection is given explicitly) -----
-# Prefer python3 for parsing (robust); fall back to grep when python3 is missing (config.json uses regular fields).
 read_config_json() {
-  local path="$1"
-  [[ -f "$path" ]] || return 1
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - "$path" <<'PY'
-import json, sys
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError()
+        result[key] = value
+    return result
+
 try:
-    d = json.load(open(sys.argv[1])).get("database", {})
-except Exception:
-    sys.exit(1)
-# Support either a direct dsn or the individual fields
-if d.get("dsn"):
-    print("DSN\t" + d["dsn"]); sys.exit(0)
-for k in ("host","port","user","password","dbname","sslmode"):
-    if d.get(k) is not None:
-        print(k.upper() + "\t" + str(d[k]))
+    with open(sys.argv[1], encoding="utf-8") as source:
+        db = json.load(source, object_pairs_hook=unique)["database"]
+    if not isinstance(db, dict):
+        raise ValueError()
+    fields = []
+    for key in ("dsn", "host", "port", "user", "password", "dbname", "sslmode"):
+        value = db.get(key)
+        if value is None:
+            continue
+        if key == "port" and type(value) is int:
+            value = str(value)
+        if not isinstance(value, str) or "\0" in value:
+            raise ValueError()
+        fields.extend((key.encode("ascii"), value.encode("utf-8")))
+    sys.stdout.buffer.write(b"\0".join(fields + [b"end", b""]))
+except (OSError, ValueError, KeyError, TypeError, RecursionError):
+    sys.exit("Invalid database configuration")
 PY
-  else
-    # Minimal fallback: grep each key (value is a string or number)
-    local k
-    for k in host port user password dbname sslmode; do
-      local v
-      v=$(grep -oE "\"$k\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+)" "$path" 2>/dev/null \
-            | head -1 | sed -E "s/.*:[[:space:]]*//; s/^\"//; s/\"$//") || true
-      [[ -n "$v" ]] && echo -e "${k^^}\t$v"
-    done
-  fi
 }
 
 apply_config_fields() {
-  local line key val
-  while IFS=$'\t' read -r key val; do
-    [[ -z "$key" ]] && continue
+  local key val
+  while IFS= read -r -d '' key; do
+    [[ "$key" != end ]] || return 0
+    IFS= read -r -d '' val || return 1
     case "$key" in
-      DSN)      [[ -z "$DSN" ]] && DSN="$val" ;;
-      HOST)     [[ -z "$HOST" ]] && HOST="$val" ;;
-      PORT)     [[ -z "$PORT" ]] && PORT="$val" ;;
-      USER)     [[ -z "$USER" ]] && USER="$val" ;;
-      PASSWORD) [[ -z "$DBPASS" ]] && DBPASS="$val" ;;
-      DBNAME)   [[ -z "$DBNAME" ]] && DBNAME="$val" ;;
-      SSLMODE)  [[ -z "$SSLMODE" ]] && SSLMODE="$val" ;;
+      dsn)      DSN="$val" ;;
+      host)     HOST="$val" ;;
+      port)     [[ -n "$PORT" ]] || PORT="$val" ;;
+      user)     USER="$val" ;;
+      password) [[ -n "$DBPASS" ]] || DBPASS="$val" ;;
+      dbname)   DBNAME="$val" ;;
+      sslmode)  [[ -n "$SSLMODE" ]] || SSLMODE="$val" ;;
     esac
   done
+  return 1
 }
 
 compose=(docker compose)
@@ -168,7 +174,8 @@ if [[ "$MODE" == "local" ]]; then
     cfg="${CONFIG:-config.json}"
     if [[ -f "$cfg" ]]; then
       info "Reading database configuration from $cfg"
-      apply_config_fields < <(read_config_json "$cfg")
+      command -v python3 >/dev/null 2>&1 || die "reading config.json requires Python 3"
+      apply_config_fields < <(read_config_json "$cfg") || die "Could not read database configuration"
     fi
   fi
 
