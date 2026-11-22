@@ -36,6 +36,25 @@ func TestBrowserCredentialTransport(t *testing.T) {
 	}
 }
 
+func TestDuplicateSessionCookies(t *testing.T) {
+	for _, lines := range [][]string{
+		{"artex_token=first; preference=dark; artex_token=second"},
+		{"artex_token=second", "artex_token=first"},
+	} {
+		r := httptest.NewRequest("GET", "/api/example", nil)
+		for _, line := range lines {
+			r.Header.Add("Cookie", line)
+		}
+		if extractToken(r) != "" {
+			t.Fatal("selected a session from ambiguous cookies")
+		}
+		r.Header.Set("Authorization", "Bearer explicit")
+		if extractToken(r) != "explicit" {
+			t.Fatal("explicit authorization should take precedence over cookies")
+		}
+	}
+}
+
 func TestBrowserOriginPolicy(t *testing.T) {
 	const ui = "http://localhost:3000"
 	for _, tc := range []struct {

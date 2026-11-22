@@ -21,8 +21,8 @@ func extractToken(r *http.Request) string {
 		}
 		return strings.TrimLeft(credential, " ")
 	}
-	if cookie, err := r.Cookie("artex_token"); err == nil {
-		return cookie.Value
+	if cookies := r.CookiesNamed("artex_token"); len(cookies) == 1 {
+		return cookies[0].Value
 	}
 	return ""
 }
