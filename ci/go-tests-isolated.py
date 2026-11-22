@@ -19,6 +19,15 @@ parser.add_argument('--output', default='artifacts/go-tests')
 parser.add_argument('--package', action='append', dest='packages')
 args = parser.parse_args()
 admin = os.environ['ARTEX_TEST_ADMIN_DSN']
+try:
+    admin_url = urllib.parse.urlsplit(admin)
+    if admin_url.scheme not in ('postgres', 'postgresql') or admin_url.fragment:
+        raise ValueError()
+    options = urllib.parse.parse_qsl(admin_url.query, keep_blank_values=True, strict_parsing=True)
+    if any(key.lower() in ('dbname', 'database', 'service') for key, _ in options):
+        raise ValueError()
+except ValueError:
+    raise SystemExit('Use a PostgreSQL test URL with the database in its path and no service override') from None
 output = Path(args.output).resolve()
 output.mkdir(parents=True, exist_ok=True)
 root = Path(__file__).resolve().parents[1]
@@ -33,7 +42,7 @@ def database_sql(statement):
 
 
 def test_dsn(name):
-    return urllib.parse.urlunsplit(urllib.parse.urlsplit(admin)._replace(path='/' + name))
+    return urllib.parse.urlunsplit(admin_url._replace(path='/' + name))
 
 
 def test_outcome(name, stdout):
@@ -55,7 +64,9 @@ with tempfile.TemporaryDirectory(prefix='artex-test-binaries-') as temporary:
         binary = Path(temporary) / f'package-{index}.test'
         subprocess.run(['go', 'test', '-c', '-o', str(binary), import_path], cwd=root, check=True)
         discovery_env = dict(os.environ)
-        discovery_env.pop('ARTEX_PG_DSN', None)
+        # TestMain runs during listing too. An explicitly invalid DSN prevents
+        # it from falling back to a developer's configured database.
+        discovery_env['ARTEX_PG_DSN'] = 'postgres://%'
         listing = subprocess.check_output([str(binary), '-test.list', '^Test'], cwd=directory,
                                           env=discovery_env, text=True)
         tests = [name for name in listing.splitlines() if re.fullmatch(r'Test\w+', name)]
