@@ -25,8 +25,11 @@ root = Path(__file__).resolve().parents[1]
 
 
 def database_sql(statement):
-    subprocess.run(['psql', '--dbname', admin, '-X', '-v', 'ON_ERROR_STOP=1', '-c', statement],
-                   check=True, capture_output=True, text=True)
+    result = subprocess.run(['psql', '--dbname', admin, '-X', '-v', 'ON_ERROR_STOP=1', '-c', statement],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        operation = statement.split(maxsplit=1)[0]
+        raise SystemExit(f'PostgreSQL test database {operation} failed (exit {result.returncode})')
 
 
 def test_dsn(name):
