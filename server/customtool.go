@@ -359,14 +359,12 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 		return actool.Errorf("未配置且未检测到 python 解释器(在系统配置里设置)"), nil
 	}
 	workDir := s.m.dir
-	var sessionEnv []string
 	if tc != nil {
 		if tc.WorkingDir != "" {
 			workDir = tc.WorkingDir
 		}
-		sessionEnv = tc.Env
 	}
-	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000))
+	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, timeoutOr(spec.TimeoutMs, 120000))
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
@@ -374,9 +372,9 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 }
 
 // execPython writes the code to a temp .py under workDir/.tools, runs it via interp
-// with the params JSON on stdin + scalar params mirrored to TOOL_<NAME> env, and
+// with the params JSON on stdin, and
 // returns combined stdout+stderr (with a timeout/exit note). Standalone + testable.
-func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration) (string, error) {
+func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, timeout time.Duration) (string, error) {
 	toolsDir := filepath.Join(workDir, ".tools")
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return "", err
@@ -397,12 +395,8 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
 	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // 会话代理 env
-	for k, v := range params {                  // 标量参数镜像成 TOOL_<NAME>
-		if sv, ok := scalarStr(v); ok {
-			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
-		}
-	}
+	// Tool parameters travel through stdin. Never inherit server credentials.
+	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + workDir}
 	pj, _ := json.Marshal(params)
 	c.Stdin = bytes.NewReader(pj) // 参数 JSON 走 stdin
 	out, err := c.CombinedOutput()

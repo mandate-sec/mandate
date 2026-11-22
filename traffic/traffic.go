@@ -637,6 +637,10 @@ func nullIfEmpty(s string) any {
 func headerLines(h map[string][]string) string {
 	var b strings.Builder
 	for k, vs := range h {
+		switch strings.ToLower(k) {
+		case "authorization", "cookie", "set-cookie", "x-api-key", "proxy-authorization":
+			vs = []string{"[REDACTED]"}
+		}
 		for _, v := range vs {
 			b.WriteString(k)
 			b.WriteString(": ")

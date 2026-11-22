@@ -81,26 +81,27 @@ func TestShellQuote(t *testing.T) {
 }
 
 // TestExecPython runs a real Python script end-to-end: it must read params from
-// stdin JSON and the mirrored env var, then print — verifying the whole script
+// stdin JSON without inheriting secrets, then print — verifying the whole script
 // param-passing path. Skips if no python3.
 func TestExecPython(t *testing.T) {
 	interp, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 unavailable")
 	}
+	t.Setenv("OPENAI_API_KEY", "test-only")
 	code := `import json,sys,os
 a = json.load(sys.stdin)
 print("stdin_target=" + a["target"])
-print("env_target=" + os.environ.get("TOOL_TARGET",""))
+print("scrubbed=" + str("TOOL_TARGET" not in os.environ and "OPENAI_API_KEY" not in os.environ))
 print("port=" + str(a["port"]))
 `
 	out, err := execPython(context.Background(), interp, "test", code,
 		map[string]any{"target": "example.com", "port": float64(8080)},
-		t.TempDir(), nil, 10*time.Second)
+		t.TempDir(), 10*time.Second)
 	if err != nil {
 		t.Fatalf("execPython error: %v", err)
 	}
-	for _, want := range []string{"stdin_target=example.com", "env_target=example.com", "port=8080"} {
+	for _, want := range []string{"stdin_target=example.com", "scrubbed=True", "port=8080"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
