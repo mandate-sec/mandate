@@ -161,14 +161,7 @@ type Traffic struct {
 	// stopping() treats as "not closing".
 	closed    chan struct{}
 	closeOnce sync.Once
-	// pass is the set of hosts whose MITM interception failed for a proxy/protocol
-	// reason; connections to them are tunneled transparently (fail-open) so the
-	// request still reaches the target — unrecorded — instead of being killed.
-	pass sync.Map // hostname(string) -> struct{}
-	// upstream is the global egress proxy every captured request is forwarded
-	// through (nil = dial targets directly). Both the intercepted and the
-	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
-	// so no host escapes it. Hot-swappable at runtime via SetUpstreamProxy.
+	// upstream holds the configured egress proxy, or nil for direct connections.
 	upstream atomic.Pointer[url.URL]
 }
 
@@ -199,7 +192,7 @@ func Open(dir, addr string) (*Traffic, error) {
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr:        addr,
-		SslInsecure: true,
+		SslInsecure: false,
 		CaRootPath:  filepath.Join(dir, "_ca"),
 	})
 	if err != nil {
@@ -215,13 +208,8 @@ func Open(dir, addr string) (*Traffic, error) {
 	// every captured request — intercepted AND transparently tunneled — is
 	// forwarded through it instead, so no host leaks the real source IP.
 	p.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return t.upstream.Load(), nil })
-	// Fail-open: MITM every host by default, EXCEPT ones a prior request proved we
-	// can't intercept without breaking (see maybePassthrough). Those are tunneled
-	// transparently so the request still reaches the target instead of being killed.
-	p.SetShouldInterceptRule(func(req *http.Request) bool {
-		_, tunnel := t.pass.Load(hostOnly(req.Host))
-		return !tunnel
-	})
+	// Keep the capture policy unchanged after protocol or certificate failures.
+	p.SetShouldInterceptRule(func(*http.Request) bool { return true })
 	p.AddAddon(&sink{t: t})
 	t.proxy = p
 	return t, nil
@@ -285,15 +273,6 @@ func (t *Traffic) initIndex() error {
 	}
 	t.fts = true
 	return nil
-}
-
-// hostOnly strips an optional :port, so passthrough keys match whether the host
-// arrives as "example.com:443" (CONNECT) or "example.com" (request URL).
-func hostOnly(hostport string) string {
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
-		return h
-	}
-	return hostport
 }
 
 // ProxyAddr returns the address workers should set as HTTP(S)_PROXY. A bare
@@ -390,40 +369,6 @@ func (s *sink) Response(f *mproxy.Flow) {
 		return
 	}
 	s.t.record(f)
-}
-
-// RequestError fires when a request through an established MITM tunnel fails. If
-// the failure looks proxy/protocol-caused (h2 quirks, HEAD-with-body, protocol
-// errors) — not a plain target-unreachable error — we flag the host for
-// transparent passthrough so future requests to it succeed instead of dying.
-func (s *sink) RequestError(f *mproxy.Flow, err error) { s.t.maybePassthrough(f, err) }
-
-// maybePassthrough marks a host to be tunneled transparently on the next
-// connection, but only for errors the proxy itself caused — a target that is
-// simply down/filtered would fail without us too, and must stay MITM'd+recorded.
-func (t *Traffic) maybePassthrough(f *mproxy.Flow, err error) {
-	if err == nil || f == nil || f.Request == nil || f.Request.URL == nil || !proxyCausedErr(err) {
-		return
-	}
-	host := f.Request.URL.Hostname()
-	if host == "" {
-		return
-	}
-	if _, loaded := t.pass.LoadOrStore(host, struct{}{}); !loaded {
-		log.Printf("[traffic] 与 %s 的 MITM 出错，改为透传（该 host 后续直连目标、不再记录，但请求照常）：%v", host, err)
-	}
-}
-
-// proxyCausedErr reports whether err indicates the interception layer (not the
-// target) is at fault — HTTP/2 handling, HEAD-with-body, or a protocol violation.
-func proxyCausedErr(err error) bool {
-	s := strings.ToLower(err.Error())
-	for _, p := range []string{"head request", "http2", "http/2", "protocol error", "protocol_error", "malformed"} {
-		if strings.Contains(s, p) {
-			return true
-		}
-	}
-	return false
 }
 
 // record persists one exchange entirely in SQLite: metadata, bodies and the

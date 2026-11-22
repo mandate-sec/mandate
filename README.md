@@ -28,6 +28,8 @@ The bundled console uses same-origin cookies for event streams. Session tokens i
 
 ## Workspace files
 
+The recording proxy verifies upstream HTTPS certificates using the system trust store. Private HTTPS services need a trusted issuing CA. A protocol failure no longer switches future connections to that host into an unrecorded tunnel.
+
 New proxy captures strip URL usernames, passwords and fragments, and replace each nonempty query string with `redacted`. This applies to stored URL metadata, the captured request line, its search index entry and recording errors. Credential headers and common headers carrying links or redirects are masked. Capture bodies, paths and other headers can still contain secrets. Existing captures, logs and backups retain their original content.
 
 The console file manager and chat upload handler use filesystem operations rooted in the configured workspace. Workspace downloads use a binary attachment response. Editor saves replace the destination after the full content arrives. Keep the workspace on a dedicated volume when untrusted processes can create files there. Mounted directories and preexisting hard links can expose data that already appears inside the workspace.
