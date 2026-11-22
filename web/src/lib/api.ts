@@ -115,6 +115,16 @@ function getToken(): string | null {
 
 export { fetchConsoleAPI };
 
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  try {
+    const payload = (await response.json()) as { error?: unknown } | null;
+    if (typeof payload?.error === "string" && payload.error.trim()) return new Error(payload.error.trim());
+  } catch {
+    // Keep the operation-specific fallback for empty or non-JSON responses.
+  }
+  return new Error(fallback);
+}
+
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
   const token = getToken();
@@ -130,17 +140,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Unauthorized");
   }
   if (!r.ok) {
-    const fallback = `${init?.method ?? "GET"} ${path}: ${r.status}`;
-    let message = fallback;
-    try {
-      const payload = (await r.json()) as { error?: unknown };
-      if (typeof payload.error === "string" && payload.error.trim()) {
-        message = payload.error.trim();
-      }
-    } catch {
-      // Keep the status-based fallback for empty or non-JSON error responses.
-    }
-    throw new Error(message);
+    throw await responseError(r, `${init?.method ?? "GET"} ${path}: ${r.status}`);
   }
   if (r.status === 204) return undefined as T;
   return r.json();
@@ -556,7 +556,7 @@ export const api = {
     const r = await fetchConsoleAPI(`/api/exploration/findings/export?${p.toString()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    if (!r.ok) throw new Error(`export: ${r.status}`);
+    if (!r.ok) throw await responseError(r, `Could not download the findings (${r.status}).`);
     const blob = await r.blob();
     // File name prefers the backend Content-Disposition and falls back to a default name.
     const disp = r.headers.get("Content-Disposition") ?? "";

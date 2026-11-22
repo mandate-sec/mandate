@@ -2154,7 +2154,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 
 	fs, err := s.m.pg.ListFindingsForExport(filter, ids)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, http.StatusInternalServerError, "Could not load the findings for export.")
 		return
 	}
 
@@ -2162,13 +2162,23 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	if format == "md-zip" {
 		stage, err = os.MkdirTemp("", "artex-finding-export-")
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeErr(w, http.StatusInternalServerError, "Could not create storage for the ZIP download.")
 			return
 		}
 		defer os.RemoveAll(stage)
 	}
 	if err = s.evidenceStore().StageFindingsExport(r.Context(), fs, stage, stage != ""); err != nil {
-		evidenceError(w, err)
+		if r.Context().Err() != nil {
+			return
+		}
+		switch {
+		case errors.Is(err, db.ErrFindingNotFound), errors.Is(err, db.ErrEvidenceNotFound):
+			writeErr(w, http.StatusNotFound, "A finding or linked evidence is no longer available. Refresh the findings list and try again.")
+		case errors.Is(err, db.ErrEvidenceConflict), errors.Is(err, db.ErrTaskArchiveState):
+			writeErr(w, http.StatusConflict, "The findings changed during export. Refresh the findings list and try again.")
+		default:
+			writeErr(w, http.StatusUnprocessableEntity, "Could not prepare the finding evidence. Check that the stored evidence is available.")
+		}
 		return
 	}
 	now := time.Now()
@@ -2185,12 +2195,14 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	case "md-zip":
 		path := filepath.Join(stage, "findings.zip")
 		if err := buildFindingsEvidenceZip(r.Context(), path, fs, stage, now); err != nil {
-			writeErr(w, 500, err.Error())
+			if r.Context().Err() == nil {
+				writeErr(w, http.StatusInternalServerError, "Could not prepare the ZIP download.")
+			}
 			return
 		}
 		file, err := os.Open(path)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeErr(w, http.StatusInternalServerError, "Could not open the ZIP for download.")
 			return
 		}
 		defer file.Close()

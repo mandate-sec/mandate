@@ -57,6 +57,7 @@ The fix prevents forwarding credentials to a second origin. Configuring that des
 | 33 | With a traversable workspace and a typical Unix umask, other local accounts could read stored capture bodies. New capture directories are private. On upgrade, restrict the dedicated traffic directory to mode 0700 before restarting capture. Windows access depends on directory ACLs. | [7f31561](https://github.com/mandate-sec/mandate/commit/7f31561bd60ccec0093f2974231ddfe145b28021) |
 | 34 | Docker password recovery sourced a checkout’s `.env` as shell code on the operator’s host. A modified file could run with the operator’s privileges. | [b102218](https://github.com/mandate-sec/mandate/commit/b102218) |
 | 35 | Local password recovery printed the full connection string, including any embedded database password, in its target confirmation. | [afec6cb](https://github.com/mandate-sec/mandate/commit/afec6cb) |
+| 36 | Authenticated findings exports could return database and local filesystem diagnostics to the console. Export errors now use fixed messages with recovery guidance. | [Export handler](server/server.go), [API regression](server/finding_traffic_test.go) |
 
 ## Cross-fork report review
 
@@ -68,5 +69,6 @@ Public default-branch source inspected on 2026-11-22. The comparison covers the 
 | 32. Findings CSV can interpret text as formulas | [No formula guard in the exporter](https://github.com/failsafe-security/artex/blob/main/report/findings.go#L145) | [Formula guard covers common prefixes, with narrower coverage than Mandate](https://github.com/BaaRai/ARTEX/blob/main/report/findings.go#L233) | [No formula guard in the exporter](https://github.com/RuoJi6/ARTEX/blob/main/report/findings.go#L151) |
 | Report bug. Unrecognized severity sorts alongside critical findings | [Present](https://github.com/failsafe-security/artex/blob/main/report/findings.go#L22) | [Present](https://github.com/BaaRai/ARTEX/blob/main/report/findings.go#L26) | [Present](https://github.com/RuoJi6/ARTEX/blob/main/report/findings.go#L22) |
 | Export bug. Unsupported formats start a database lookup before returning an error | [Present](https://github.com/failsafe-security/artex/blob/main/server/server.go#L2106) | [Present](https://github.com/BaaRai/ARTEX/blob/main/server/server.go#L2416) | [Present](https://github.com/RuoJi6/ARTEX/blob/main/server/server.go#L2444) |
+| 36. Findings exports can return internal diagnostics | [Present](https://github.com/failsafe-security/artex/blob/main/server/server.go#L2106) | [Present](https://github.com/BaaRai/ARTEX/blob/main/server/server.go#L2416) | [Present](https://github.com/RuoJi6/ARTEX/blob/main/server/server.go#L2444) |
 
 Mandate sorts informational and unrecognized severities below low severity in Markdown and CSV. Its summary Markdown also includes those findings in its severity counts. Export format validation now runs before the database lookup, and only ZIP exports create a temporary staging directory.

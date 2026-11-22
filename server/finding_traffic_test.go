@@ -271,6 +271,18 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if w = req("GET", exportURL, ""); w.Code < 400 || strings.Contains(w.Header().Get("Content-Type"), "zip") {
 		t.Fatal("corrupt export returned an attachment", w.Code)
 	}
+	if err = os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	w = req("GET", exportURL, "")
+	var failure map[string]string
+	if err = json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusUnprocessableEntity || w.Header().Get("Content-Disposition") != "" ||
+		failure["error"] != "Could not prepare the finding evidence. Check that the stored evidence is available." {
+		t.Fatalf("missing body response: %d %s", w.Code, w.Body)
+	}
 }
 
 func TestFindingTrafficArchiveV3RoundTripAndRetry(t *testing.T) {
