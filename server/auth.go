@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"net/http"
@@ -56,16 +57,21 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		if pg == nil {
 			return
 		}
-		generation, _, err := pg.GetSetting("auth.session_generation")
+		generation, _, err := pg.GetSettingContext(r.Context(), "auth.session_generation")
 		if err != nil {
 			writeErr(w, 503, errDataSourceUnavailable)
 			return
 		}
-		if !verifyJWT(tok, sessionSigningKey(s.jwtKey, generation)) {
+		expires, valid := sessionExpiry(tok, sessionSigningKey(s.jwtKey, generation))
+		if !valid {
 			writeErr(w, 401, "token 无效或已过期")
 			return
 		}
-		h.ServeHTTP(w, r)
+		session := streamSession{expires: expires, current: func(ctx context.Context) bool {
+			current, _, err := pg.GetSettingContext(ctx, "auth.session_generation")
+			return err == nil && current == generation
+		}}
+		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), streamSessionKey{}, session)))
 	})
 }
 

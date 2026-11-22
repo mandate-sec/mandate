@@ -1,13 +1,20 @@
 package db
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 // Settings is a tiny key-value store for global app config the UI toggles at
 // runtime (e.g. traffic_capture). Missing keys fall back to caller defaults.
 
 // GetSetting returns the stored value and ok=false when the key is unset.
 func (d *DB) GetSetting(key string) (value string, ok bool, err error) {
-	err = d.QueryRow(`SELECT value FROM settings WHERE key=$1`, key).Scan(&value)
+	return d.GetSettingContext(context.Background(), key)
+}
+
+func (d *DB) GetSettingContext(ctx context.Context, key string) (value string, ok bool, err error) {
+	err = d.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}

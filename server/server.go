@@ -661,14 +661,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
-	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
+	mux.HandleFunc("GET /api/logs/stream", authenticatedStream(s.streamLogs))
 
 	// 页面一键更新。走的是默认的 JWT 鉴权（auth.go 只放行 /api/auth/* 和
 	// /api/health），所以这几个改动程序自身的接口天然需要登录。
 	mux.HandleFunc("GET /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
-	mux.HandleFunc("GET /api/update/stream", s.updateStream)
+	mux.HandleFunc("GET /api/update/stream", authenticatedStream(s.updateStream))
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
@@ -774,7 +774,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/activity/history", s.activityHistory)
 	mux.HandleFunc("GET /api/exploration/main-sessions", s.mainSessions)
 	mux.HandleFunc("POST /api/exploration/main-session/new", s.newMainSession)
-	mux.HandleFunc("GET /api/exploration/activity/stream", s.streamActivity)
+	mux.HandleFunc("GET /api/exploration/activity/stream", authenticatedStream(s.streamActivity))
 	mux.HandleFunc("GET /api/exploration/activity/{seq}", s.activityDetail)
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
@@ -2951,6 +2951,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines, cursor := logSink.recent(since, 1000)
 	for _, l := range lines {
+		if r.Context().Err() != nil {
+			return
+		}
 		send(l)
 	}
 	if cursor > since {
@@ -3036,6 +3039,9 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 	// the id<=since skip below drops any that this replay already covered.
 	const replayBatch = 500
 	for {
+		if r.Context().Err() != nil {
+			return
+		}
 		items, cursor, err := t.Store.ActivityList(intentPtr, since, replayBatch)
 		if err != nil {
 			log.Printf("[activity/stream] task=%s replay since=%d: %v", t.ID, since, err)

@@ -30,8 +30,17 @@ func signJWT(key []byte) (string, error) {
 
 // verifyJWT returns true when tokenStr is a valid, non-expired HS256 token.
 func verifyJWT(tokenStr string, key []byte) bool {
-	t, err := jwt.ParseWithClaims(tokenStr, &jwt.RegisteredClaims{}, func(t *jwt.Token) (any, error) {
+	_, valid := sessionExpiry(tokenStr, key)
+	return valid
+}
+
+func sessionExpiry(tokenStr string, key []byte) (time.Time, bool) {
+	claims := &jwt.RegisteredClaims{}
+	t, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 		return key, nil
 	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired(), jwt.WithSubject("ARTEX"))
-	return err == nil && t.Valid
+	if err != nil || !t.Valid || claims.ExpiresAt == nil {
+		return time.Time{}, false
+	}
+	return claims.ExpiresAt.Time, true
 }

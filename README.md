@@ -16,7 +16,7 @@ Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before star
 
 ## Browser sessions
 
-Changing the administrator password invalidates earlier tokens for subsequent API requests, including reconnects. A response or event stream already open can continue until it closes. To terminate existing streams immediately after a suspected compromise, restart each console instance.
+Changing the administrator password invalidates earlier tokens for subsequent API requests, including reconnects. Open console event streams expire with the token and recheck the shared session generation every 15 seconds. A failed check closes the stream, with a three-second timeout for the database lookup. Data already delivered or buffered before cancellation cannot be recalled.
 
 Upgrading to the new session key format signs everyone out once. Sign in again with your existing password. The server generates a fresh 32-byte key in `keys/session-v2.key` beside the executable (in the existing keys volume for Compose). The storage filesystem must support hard links. Protect this directory with owner-only write access and keep it outside the browsable data directory. On Windows, restrict its ACL to the service account and trusted administrators. Legacy `jwt.key` files and backups can contain secrets accepted by older builds. This upgrade leaves those files untouched and retires their keys on the upgraded server.
 
