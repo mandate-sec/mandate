@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Autumn-27/artex/db"
 )
@@ -151,7 +152,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	w := csv.NewWriter(&buf)
 	_ = w.Write([]string{"ID", "名称", "类别", "严重等级", "状态", "所属任务", "发现时间", "概述", "流量证据数量", "流量证据ID"})
 	for _, f := range items {
-		_ = w.Write([]string{
+		row := []string{
 			fmt.Sprintf("%d", f.ID),
 			findingTitle(f),
 			f.VulnClass,
@@ -161,10 +162,32 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			f.CreatedAt.Format("2006-01-02 15:04:05"),
 			strings.TrimSpace(f.Summary),
 			fmt.Sprint(len(f.TrafficBindings)), findingTrafficIDs(f),
-		})
+		}
+		for i, value := range row {
+			row[i] = spreadsheetText(value)
+		}
+		_ = w.Write(row)
 	}
 	w.Flush()
 	return buf.Bytes()
+}
+
+// CSV quoting preserves column boundaries but spreadsheet readers can still
+// evaluate the decoded cell. Guard formula prefixes after ignorable characters.
+func spreadsheetText(value string) string {
+	trimmed := strings.TrimLeftFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\uFEFF'
+	})
+	if strings.HasPrefix(value, "\t") || strings.HasPrefix(value, "\r") || strings.HasPrefix(value, "\n") {
+		return "'" + value
+	}
+	for _, first := range trimmed {
+		if strings.ContainsRune("=+-@＝＋－＠", first) {
+			return "'" + value
+		}
+		break
+	}
+	return value
 }
 
 func findingTrafficIDs(f *db.DBFinding) string {
