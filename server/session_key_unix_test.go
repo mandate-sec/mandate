@@ -4,8 +4,10 @@ package server
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSessionKeyRejectsUnsafeUnixPermissions(t *testing.T) {
@@ -54,5 +56,36 @@ func TestSessionKeyOpenRejectsSymlink(t *testing.T) {
 	}
 	if _, err := openSessionKey(link, expected); err == nil {
 		t.Fatal("session key open followed a symlink")
+	}
+}
+
+func TestSessionKeyOpenRejectsReplacedFIFO(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.key")
+	if err := os.WriteFile(path, make([]byte, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("mkfifo", path).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := openSessionKey(path, expected)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("accepted a replacement FIFO as a signing key")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("opening a replacement FIFO waited for a writer")
 	}
 }
