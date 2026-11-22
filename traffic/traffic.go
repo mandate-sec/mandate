@@ -32,6 +32,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	recoveryjournal "github.com/Autumn-27/artex/internal/journal"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/lqqyt2423/go-mitmproxy/cert"
@@ -1272,7 +1273,7 @@ func (t *Traffic) stageTreesForArchive(dirs, hosts []string, archiveID, taskID i
 		planned[i].staged = filepath.Join(stageDir, fmt.Sprintf("%d-%s", i, filepath.Base(planned[i].source)))
 		journal.Moves = append(journal.Moves, hostDeleteStageMove{Source: planned[i].source, Staged: planned[i].staged})
 	}
-	if err := writeHostDeleteStageJournal(filepath.Join(stageDir, hostDeleteStageJournalName), journal); err != nil {
+	if err := recoveryjournal.Create(t.dir, filepath.Join(stageDir, hostDeleteStageJournalName), journal); err != nil {
 		_ = os.RemoveAll(stageDir)
 		return "", nil, err
 	}
@@ -1284,26 +1285,6 @@ func (t *Traffic) stageTreesForArchive(dirs, hosts []string, archiveID, taskID i
 		moves = append(moves, stagedTrafficPath{source: source, staged: staged})
 	}
 	return stageDir, moves, nil
-}
-
-func writeHostDeleteStageJournal(path string, journal hostDeleteStageJournal) error {
-	raw, err := json.Marshal(journal)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(raw); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	return file.Close()
 }
 
 // restoreTrees puts staged directories back where they came from, newest move

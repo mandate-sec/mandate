@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	pgdb "github.com/Autumn-27/artex/db"
+	recoveryjournal "github.com/Autumn-27/artex/internal/journal"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -61,26 +62,6 @@ type taskArchiveRestoreFiles struct {
 	extracted string
 	moves     []restoredArchivePath
 	done      bool
-}
-
-func writeArchiveJournal(path string, value any) error {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, archiveFileMode)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(raw); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	return file.Close()
 }
 
 func taskArchiveRoot(dataDir string) string {
@@ -228,8 +209,7 @@ func stageTaskArchiveFiles(dataDir string, archiveID int64, taskID string, explo
 	// Persist the complete plan before the first rename. Recovery can therefore
 	// roll back any prefix of the moves after an abrupt process termination.
 	stage.journal.Moves = targets
-	if err := writeArchiveJournal(journalPath, stage.journal); err != nil {
-		_ = stage.rollback()
+	if err := recoveryjournal.Create(dataDir, journalPath, stage.journal); err != nil {
 		return nil, err
 	}
 	if err := stage.applyMoves(); err != nil {
@@ -339,7 +319,7 @@ func installTaskArchiveFiles(dataDir, extractedDir, taskID string, archiveID int
 	}
 	stage.moves = sources
 	journal := archiveRestoreJournal{ArchiveID: archiveID, TaskID: numericTaskID, Moves: sources}
-	if err := writeArchiveJournal(filepath.Join(extractedDir, "restore-journal.json"), journal); err != nil {
+	if err := recoveryjournal.Create(dataDir, filepath.Join(extractedDir, "restore-journal.json"), journal); err != nil {
 		return nil, err
 	}
 	for _, move := range sources {
