@@ -11,6 +11,16 @@ export interface CurrentUser {
 }
 
 export const auth = {
+  onSessionChange(listener: () => void): () => void {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea === window.localStorage && (event.key === TOKEN_KEY || event.key === null)) {
+        listener();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  },
+
   getToken(): string | null {
     if (typeof window === "undefined") return null;
     // Mock demo: no real login; return a fake token so the route guard passes and goes straight to the main UI.
