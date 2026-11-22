@@ -26,7 +26,9 @@ jobs:
     env:
       ARTEX_TEST_ADMIN_DSN: postgres://artex:regression-fixture@127.0.0.1:5432/artex?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Test entrypoint shutdown and restart handling
         run: python3 -m unittest discover -s tests -p test_start.py -v
       - uses: actions/setup-node@v4
@@ -66,7 +68,9 @@ jobs:
     env:
       ARTEX_PG_DSN: postgres://artex:e2e-fixture@127.0.0.1:5432/artex?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -107,7 +111,9 @@ jobs:
     env:
       ARTEX_PG_DSN: postgres://artex:integration-fixture@127.0.0.1:5432/artex?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.10"
@@ -120,7 +126,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Test verification failure handling
         run: sh tests/verify.sh
