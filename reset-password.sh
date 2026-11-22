@@ -15,13 +15,13 @@
 #
 # Usage:
 #   ./reset-password.sh                          # local, prompt for a new password
-#   ./reset-password.sh -p 'NewPass!'            # local, supply it directly
-#   ./reset-password.sh --dsn postgres://u:p@h:5432/artex
-#   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -W pass -d artex
+#   ./reset-password.sh --password-stdin -y < /private/path/password
+#   ./reset-password.sh --dsn postgres://u@h:5432/artex
+#   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -d artex
 #   ./reset-password.sh -m docker                # docker (uses the running database container settings)
 #   ./reset-password.sh -m docker -c pg --exec docker
-# Security: password via env var + psql \getenv (not argv), auto-escaped with
-# :'var'; the DB password goes through PGPASSWORD, also out of argv.
+# For automation, --password-stdin reads one line and preserves spaces.
+# The legacy -p and -W flags expose their values in process arguments.
 # =============================================================================
 set +ax
 set -euo pipefail
@@ -37,6 +37,7 @@ CONFIG=""
 CONTAINER=""       # postgres service/container name in docker mode (default: postgres)
 EXEC_KIND=""       # compose | docker (which exec to use in docker mode; empty = auto)
 NEWPASS=""
+PASSWORD_STDIN=0
 ASSUME_YES=0
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -58,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --config)         CONFIG="${2:-}"; shift 2 ;;
     -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
     --exec)           EXEC_KIND="${2:-}"; [[ "$EXEC_KIND" == compose || "$EXEC_KIND" == docker ]] || die "--exec requires compose or docker"; shift 2 ;;
+    --password-stdin) PASSWORD_STDIN=1; shift ;;
     -p|--new-password) NEWPASS="${2:-}"; shift 2 ;;
     -y|--yes)         ASSUME_YES=1; shift ;;
     -h|--help)        usage ;;
@@ -144,10 +146,13 @@ fi
 info "Deployment mode: $MODE"
 
 # ---- Collect the new password ----------------------------------------------
-if [[ -z "$NEWPASS" ]]; then
-  read -r -s -p "Enter new password (username is always ARTEX): " NEWPASS; echo >&2
+if [[ "$PASSWORD_STDIN" == 1 ]]; then
+  [[ -z "$NEWPASS" ]] || die "choose one new password input"
+  IFS= read -r -s NEWPASS || [[ -n "$NEWPASS" ]] || die "missing password on standard input"
+elif [[ -z "$NEWPASS" ]]; then
+  IFS= read -r -s -p "Enter new password (username is always ARTEX): " NEWPASS; echo >&2
   [[ -n "$NEWPASS" ]] || die "password cannot be empty"
-  read -r -s -p "Enter again to confirm: " NEWPASS2; echo >&2
+  IFS= read -r -s -p "Enter again to confirm: " NEWPASS2; echo >&2
   [[ "$NEWPASS" == "$NEWPASS2" ]] || die "the two entries do not match"
 fi
 [[ -n "$NEWPASS" ]] || die "password cannot be empty"

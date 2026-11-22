@@ -78,19 +78,19 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz DEFAULT now())'
           for pass in fixture-first fixture-second "$(printf 'é%.0s' {1..36})"; do
-            bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -p "$pass" -y
+            bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" --password-stdin -y <<< "$pass"
             generation=$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")
             [[ "$generation" =~ ^[a-f0-9]{64}$ && "$generation" != "${previous:-}" ]]
             previous=$generation
           done
           for invalid in short "$(printf '%073d' 0)" "$(printf 'é%.0s' {1..37})"; do
-            if bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -p "$invalid" -y; then
+            if bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" --password-stdin -y <<< "$invalid"; then
               exit 1
             fi
             [[ "$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")" == "$previous" ]]
           done
           psql -v ON_ERROR_STOP=1 -c 'CREATE DATABASE "recovery=fixture"'
           PGDATABASE='recovery=fixture' psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz DEFAULT now())'
-          bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d 'recovery=fixture' -p fixture-literal -y
+          bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d 'recovery=fixture' --password-stdin -y <<< fixture-literal
           [[ "$(PGDATABASE='recovery=fixture' psql -Atc "SELECT count(*) FROM settings")" == "2" ]]
           [[ "$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")" == "$previous" ]]
