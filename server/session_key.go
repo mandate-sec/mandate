@@ -65,7 +65,11 @@ func loadOrCreateJWTKey(baseDir, dataDir string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("session key must be a regular file")
 	}
-	f, err := os.Open(path)
+	return openSessionKey(path, info)
+}
+
+func openSessionKey(path string, info os.FileInfo) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|sessionKeyOpenFlags, 0)
 	if err != nil {
 		return nil, err
 	}

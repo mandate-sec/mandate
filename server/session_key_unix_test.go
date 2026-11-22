@@ -37,3 +37,22 @@ func TestSessionKeyRejectsUnsafeUnixPermissions(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionKeyOpenRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "key")
+	if err := os.WriteFile(target, make([]byte, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "alias")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openSessionKey(link, expected); err == nil {
+		t.Fatal("session key open followed a symlink")
+	}
+}
