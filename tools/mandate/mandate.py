@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import unicodedata
+import warnings
 from datetime import date, datetime, timezone
 
 from cryptography.exceptions import InvalidSignature
@@ -118,6 +119,16 @@ def read_key(path):
     return pem
 
 
+def signing_passphrase(prompt):
+    # getpass warns before falling back to a potentially echoed stdin read.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        try:
+            return getpass.getpass(prompt)
+        except getpass.GetPassWarning:
+            raise ValueError("open a terminal that supports hidden passphrase input") from None
+
+
 def rejection_message(exc):
     # Validation errors may quote fields supplied by an untrusted document.
     detail = str(exc) or type(exc).__name__
@@ -222,8 +233,8 @@ def main():
     if args.cmd == "keygen":
         if args.key.exists() or args.trusted_key.exists() or args.key.resolve() == args.trusted_key.resolve():
             raise ValueError("choose unused, distinct key paths")
-        password = getpass.getpass("New signing passphrase: ")
-        if len(password) < 12 or password != getpass.getpass("Confirm passphrase: "):
+        password = signing_passphrase("New signing passphrase: ")
+        if len(password) < 12 or password != signing_passphrase("Confirm passphrase: "):
             raise ValueError("passphrases must match and contain at least 12 characters")
         key = Ed25519PrivateKey.generate()
         for path in (args.key, args.trusted_key):
@@ -241,7 +252,7 @@ def main():
             return
         print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
         return
-    key = ser.load_pem_private_key(read_key(args.key), getpass.getpass("Signing passphrase: ").encode())
+    key = ser.load_pem_private_key(read_key(args.key), signing_passphrase("Signing passphrase: ").encode())
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("expected encrypted Ed25519 key")
     fp = fingerprint(key.public_key())

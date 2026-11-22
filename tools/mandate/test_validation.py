@@ -1,5 +1,8 @@
 import tempfile
 import unittest
+import getpass
+from io import StringIO
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,6 +10,13 @@ import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_visible_passphrase_fallback_reads_nothing(self):
+        source = StringIO("synthetic passphrase\n")
+        with patch("sys.stdin", source), patch.object(getpass, "getpass", getpass.fallback_getpass):
+            with self.assertRaisesRegex(ValueError, "hidden passphrase input"):
+                mandate.signing_passphrase("Password: ")
+        self.assertEqual(source.tell(), 0)
+
     def test_submicrosecond_validity_boundaries(self):
         record = dict(engagement="Local review", authorized_by=dict(name="Owner", email="owner@example.org", key_fingerprint="test"),
                       scope=dict(targets=["localhost"], checks=["web_scan"], excluded=[]),
