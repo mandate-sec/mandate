@@ -5,8 +5,7 @@ cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 real_grep=$(command -v grep)
-real_tail=$(command -v tail)
-export REAL_GREP="$real_grep" REAL_TAIL="$real_tail"
+export REAL_GREP="$real_grep"
 export CALL_LOG="$work/calls"
 
 cat > "$work/tool" <<'EOF'
@@ -30,11 +29,11 @@ if [ "$tool" = "${FAIL_TOOL:-}" ]; then exit 42; fi
 case "$tool" in
   strings) printf '%s\n' "${MARKER:-harmless binary text}" ;;
   grep) exec "$REAL_GREP" "$@" ;;
-  tail) exec "$REAL_TAIL" "$@" ;;
+  id) printf '%s\n' "${FIXTURE_UID:-10001}" ;;
 esac
 EOF
 chmod +x "$work/tool"
-for tool in docker sha256sum strings grep id node playwright-mcp playwright-cli nmap tail ls; do
+for tool in docker sha256sum strings grep id node playwright-mcp playwright-cli ls; do
   ln -s tool "$work/$tool"
 done
 export PATH="$work:$PATH"
@@ -52,16 +51,19 @@ check_failure() {
   fi
 }
 
-for tool in sha256sum strings grep id node playwright-mcp playwright-cli browser nmap tail ls; do
+for tool in sha256sum strings grep id node playwright-mcp playwright-cli browser ls; do
   export FAIL_TOOL="$tool"
   check_failure "$tool failure"
-  if [ "$tool" = browser ] && "$REAL_GREP" -q '^nmap$' "$CALL_LOG"; then
+  if [ "$tool" = browser ] && "$REAL_GREP" -q '^ls$' "$CALL_LOG"; then
     echo 'FAIL: checks continued after browser failure' >&2
     exit 1
   fi
   printf 'PASS: %s failure stops verification\n' "$tool"
 done
 unset FAIL_TOOL
+export FIXTURE_UID=0
+check_failure "root runtime"
+unset FIXTURE_UID
 for marker in verifyCaptcha tomicdd congdonglinux; do
   export MARKER="$marker"
   check_failure "$marker present"

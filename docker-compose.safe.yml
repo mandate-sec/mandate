@@ -51,6 +51,7 @@ services:
       # - ./skills:/app/skills:ro
     restart: unless-stopped
     stop_grace_period: 30s
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     # Chromium needs more than Docker's default 64 MB /dev/shm.

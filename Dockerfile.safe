@@ -106,11 +106,15 @@ COPY --from=go-builder /out/artex /app/artex
 COPY start.sh /app/start.sh
 COPY skills/ /app/skills/
 RUN chmod +x /app/artex /app/start.sh \
-    && mkdir -p /app/data /app/keys /app/.playwright \
+    && groupadd --gid 10001 mandate \
+    && useradd --uid 10001 --gid mandate --create-home --shell /usr/sbin/nologin mandate \
+    && install -d -m 0700 -o mandate -g mandate /app/data /app/keys \
+    && mkdir -p /app/.playwright \
     && printf '%s\n' '{"browser":{"browserName":"chromium","launchOptions":{"args":["--no-sandbox"]}}}' > /app/.playwright/cli.config.json
 
-# Upstream runs as root; keep that for tool parity. compose adds
-# no-new-privileges and binds the console to loopback.
+# Chromium uses --no-sandbox for container compatibility.
+USER 10001:10001
+ENV HOME=/home/mandate
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium \
     NODE_PATH=/usr/local/lib/node_modules \

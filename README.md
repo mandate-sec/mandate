@@ -61,7 +61,7 @@ a hardened supply chain, and deployment controls.
 This repository exists because the prebuilt `tomicdd/artex` Docker image was
 found to contain an unauthenticated command-execution backdoor in November 2026.
 This build is compiled from the audited `v0.3.15` source tag and keeps upstream's
-full runtime capabilities, including Node 22, Playwright, Chromium, and nmap.
+runtime dependencies, including Node 22, Playwright, Chromium, and nmap.
 The compose file binds the console to localhost and does not publish the
 recording proxy.
 
@@ -98,7 +98,7 @@ runs on infrastructure you control.
   conversation agent lets a human steer mid-run.
 - **Real execution capabilities.** Shell and file tools, browser automation
   through Playwright MCP/CLI and bundled Chromium, skills, MCP servers, custom
-  Python tools, DNS/network recon, and raw SYN scans with `nmap`.
+  Python tools, and DNS/network tools.
 - **Evidence-backed findings.** Findings keep task/asset lineage and recorded
   HTTP evidence, generate reports, and enter a dedicated retest workflow with
   `reproduced`, `fixed`, or `inconclusive` verdicts.
@@ -119,7 +119,7 @@ runs on infrastructure you control.
 | Area | Upstream default | This build |
 |---|---|---|
 | Image | prebuilt `tomicdd/artex` (backdoored) | compiled from this source tree |
-| Runtime user | root | root (upstream parity) |
+| Runtime user | root | UID and GID 10001 |
 | Console binding | `0.0.0.0:8787` | `127.0.0.1:8787` |
 | Recording proxy | published on `8788` | not published |
 | Static UI delivery | uncompressed, no cache validators | Brotli/gzip + immutable cache + ETags |
@@ -128,15 +128,12 @@ runs on infrastructure you control.
 | Browser MCP launcher | `npx @playwright/mcp` | pinned `playwright-mcp` |
 | API-recon dependencies | installed during a run | preinstalled from a locked official registry |
 | Online self-update | enabled, points upstream | compiled off; no remote check or download |
-| Capabilities | default Docker set | default Docker set + `no-new-privileges` |
+| Capabilities | default Docker set | all dropped in Compose, with `no-new-privileges` |
 | Base images | floating tags | pinned by digest |
 
-The API, UI, skills, browser MCP, and browser-driven recon are otherwise
-unchanged. Node, Playwright, the Playwright MCP/CLI, and Chromium are
-preinstalled; `nmap` raw scans and runtime `apt`/`npm -g` installs work because
-the container runs as root, as upstream does. The deployment hardening that
-remains is the loopback-only console, an unpublished proxy, `no-new-privileges`,
-a persisted JWT key, and digest-pinned base images.
+The app runs as UID and GID 10001. Existing installations should stop the app, back up the volumes, and transfer ownership of the dedicated app data and session-key files to that account before upgrading. Keep the key directory mode 0700 and its signing key mode 0600. PostgreSQL manages its own volume separately. New app volumes inherit the image directory ownership.
+
+Chromium still uses `--no-sandbox` for container compatibility. Use an isolated host for untrusted pages.
 
 ## Managed ARTEX runs
 

@@ -60,7 +60,7 @@ try:
     else:
         raise RuntimeError('PostgreSQL did not become ready')
     docker('run', '-d', '--name', app, '--network', name,
-           '--security-opt', 'no-new-privileges:true', '--shm-size=1g',
+           '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--shm-size=1g',
            '-e', 'MANDATE_SETUP_TOKEN_SHA256=' + hashlib.sha256(setup_token.encode()).hexdigest(),
            '-e', f'ARTEX_PG_DSN=postgres://artex:smoke-db-fixture@{pg}:5432/artex?sslmode=disable',
            '-v', data + ':/app/data', '-v', keys + ':/app/keys',
@@ -85,8 +85,8 @@ try:
     expect(api('/api/update/rollback', 'POST', {}, token), 403)
     print(docker('exec', app, 'node', '/ci/api-recon-smoke.js').stdout.strip())
     print(docker('exec', app, 'node', '/ci/browser-mcp-smoke.cjs').stdout.strip())
-    raw_scan = docker('exec', app, 'nmap', '-sS', '-p', '8787', '127.0.0.1').stdout
-    assert '8787/tcp open' in raw_scan, raw_scan
+    assert docker('exec', app, 'id', '-u').stdout.strip() == '10001'
+    assert docker('exec', app, 'test', '-w', '/app/artex', check=False).returncode == 1
     stopped = time.monotonic()
     docker('stop', '--time', '15', app)
     state = json.loads(docker('inspect', '--format', '{{json .State}}', app).stdout)

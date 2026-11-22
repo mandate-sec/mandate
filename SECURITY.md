@@ -30,10 +30,7 @@ scope, rules of engagement, and applicable law.
 - **Treat the console as admin-equivalent.** Custom Python tools and MCP stdio
   servers execute arbitrary code by design. A stolen admin session is code
   execution.
-- **Expect root inside the container.** The image runs as root, matching
-  upstream, so nmap raw scans and runtime tool installation work. Keep
-  `no-new-privileges`, do not add `privileged: true`, and never mount the Docker
-  socket. Treat the container as a high-value host if it is compromised.
+- **Keep the runtime unprivileged.** The application image uses UID and GID 10001. Compose drops all Linux capabilities and sets `no-new-privileges`. Keep the Docker socket outside the container.
 - **Review skills.** `skills/` is copied into the image. A skill can instruct
   the agent to run commands. Review any skill you add or mount.
 - **Keep secrets out of images.** The image contains no API keys, database
@@ -64,12 +61,10 @@ scope, rules of engagement, and applicable law.
 2. **Dependency trust.** Third-party Go modules, apt packages, npm packages,
    and Chromium are verified by their ecosystems but not audited line by line.
    The browser stack is the largest third-party surface in the image.
-3. **Root runtime and browser surface.** The container runs as root to preserve
-   upstream capability, and Chromium parses untrusted web content. Do not run it
-   on a host with sensitive data, and keep the console loopback-only.
+3. **Runtime access.** Code running as the service account can access its workspace and session key. Keep backups outside the service account's control.
 4. **No signature verification on self-update.** Online update checks and downloads are disabled
    by the compile-time `selfupdate.Enabled = false` constant. Do not re-enable it against an untrusted
    feed.
-5. **Browser sandboxing.** Chromium runs as root with `--no-sandbox` for
+5. **Browser sandboxing.** Chromium runs with `--no-sandbox` for
    reliable startup, so the browser's own sandbox is not a security boundary
    here. Rely on the container and host isolation instead.

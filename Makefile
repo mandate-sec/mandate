@@ -39,8 +39,7 @@ verify:
 	  playwright-mcp --version; \
 	  playwright-cli --version; \
 	  node -e "const {chromium}=require(\"/usr/local/lib/node_modules/@playwright/mcp/node_modules/playwright\"); (async()=>{const b=await chromium.launch({headless:true,args:[\"--no-sandbox\"]});const p=await b.newPage();await p.setContent(\"<title>ok</title>\");if(await p.title()!==\"ok\")process.exit(1);await b.close();console.log(\"browser: ok\")})().catch(e=>{console.error(e);process.exit(1)})"; \
-	  scan_output=$$(nmap -sS -p 8787 127.0.0.1); \
-	  printf "%s\n" "$$scan_output" | tail -3; \
+	  test "$$(id -u)" = 10001; \
 	  ls -l /app/artex /app/start.sh /usr/bin/chromium'
 	docker image inspect $(IMAGE) --format 'image id: {{.Id}}'
 
