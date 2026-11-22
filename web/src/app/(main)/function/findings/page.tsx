@@ -253,6 +253,12 @@ export default function FindingsPage() {
   const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
   const [exportFormat, setExportFormat] = React.useState<"md-single" | "md-zip" | "csv" | "json">("md-single");
   const [exporting, setExporting] = React.useState(false);
+  const exportRequest = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => () => {
+    exportRequest.current?.abort();
+    exportRequest.current = null;
+  }, []);
 
   const toggleSelected = React.useCallback((id: string, checked: boolean) => {
     setSelectedIds((prev) => {
@@ -280,7 +286,17 @@ export default function FindingsPage() {
     setExportOpen(true);
   }
 
+  function closeExport() {
+    exportRequest.current?.abort();
+    exportRequest.current = null;
+    setExporting(false);
+    setExportOpen(false);
+  }
+
   async function doExport() {
+    if (exportRequest.current) return;
+    const request = new AbortController();
+    exportRequest.current = request;
     setExporting(true);
     try {
       await api.exportFindings({
@@ -288,13 +304,18 @@ export default function FindingsPage() {
         scope: exportScope,
         filters: { severity, status, vulnclass, task, query, sort },
         ids: [...selectedIds],
+        signal: request.signal,
       });
+      if (request.signal.aborted) return;
       setExportOpen(false);
       toast.success("Export download started");
     } catch (e) {
-      toast.error(`Export failed: ${(e as Error).message}`);
+      if (!request.signal.aborted) toast.error(`Export failed: ${(e as Error).message}`);
     } finally {
-      setExporting(false);
+      if (exportRequest.current === request) {
+        exportRequest.current = null;
+        setExporting(false);
+      }
     }
   }
 
@@ -1201,7 +1222,7 @@ export default function FindingsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+      <Dialog open={exportOpen} onOpenChange={(open) => { if (!open) closeExport(); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Export findings</DialogTitle>
@@ -1211,7 +1232,7 @@ export default function FindingsPage() {
           <div className="flex flex-col gap-5 py-1">
             <div className="flex flex-col gap-2">
               <span className="text-xs text-muted-foreground">Export scope</span>
-              <RadioGroup value={exportScope} onValueChange={(v) => setExportScope(v as typeof exportScope)}>
+              <RadioGroup value={exportScope} onValueChange={(v) => setExportScope(v as typeof exportScope)} disabled={exporting}>
                 <label htmlFor="export-scope-filtered" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-scope-filtered" value="filtered" /> Export current filtered results ({filteredTotal}{" "}
                   total)
@@ -1231,7 +1252,7 @@ export default function FindingsPage() {
 
             <div className="flex flex-col gap-2">
               <span className="text-xs text-muted-foreground">Export format</span>
-              <RadioGroup value={exportFormat} onValueChange={(v) => setExportFormat(v as typeof exportFormat)}>
+              <RadioGroup value={exportFormat} onValueChange={(v) => setExportFormat(v as typeof exportFormat)} disabled={exporting}>
                 <label htmlFor="export-format-md-single" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-md-single" value="md-single" /> Markdown summary report (single .md file)
                 </label>
@@ -1255,8 +1276,8 @@ export default function FindingsPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
-              Cancel
+            <Button variant="outline" onClick={closeExport}>
+              {exporting ? "Cancel export" : "Cancel"}
             </Button>
             <Button onClick={doExport} disabled={exporting || (exportScope === "selected" && selectedIds.size === 0)}>
               <DownloadIcon /> {exporting ? "Exporting…" : "Export"}

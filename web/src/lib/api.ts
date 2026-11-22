@@ -545,6 +545,7 @@ export const api = {
     scope: "filtered" | "all" | "selected";
     filters?: Omit<FindingQuery, "page" | "pageSize">;
     ids?: string[];
+    signal?: AbortSignal;
   }) => {
     const p = new URLSearchParams({ format: opts.format, scope: opts.scope });
     if (opts.scope === "selected") {
@@ -555,9 +556,11 @@ export const api = {
     const token = getToken();
     const r = await fetchConsoleAPI(`/api/exploration/findings/export?${p.toString()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: opts.signal,
     });
     if (!r.ok) throw await responseError(r, `Could not download the findings (${r.status}).`);
     const blob = await r.blob();
+    opts.signal?.throwIfAborted();
     // File name prefers the backend Content-Disposition and falls back to a default name.
     const disp = r.headers.get("Content-Disposition") ?? "";
     const m = disp.match(/filename="?([^"]+)"?/);
