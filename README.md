@@ -32,6 +32,8 @@ The recording proxy verifies upstream HTTPS certificates using the system trust 
 
 Remote MCP connections and the enrichment HTTP client also verify HTTPS certificates. Saved MCP configurations with the legacy certificate bypass setting now use verification. New configurations requesting the bypass are rejected. A proxied HTTPS connection will fail if the client does not trust the issuer presented by the proxy.
 
+MCP redirects and server-announced message endpoints must stay on the configured scheme, host and port. This keeps custom authorization headers and message bodies within the configured origin. If an installation previously redirected MCP traffic elsewhere, review that destination and rotate credentials that may have reached it.
+
 New proxy captures strip URL usernames, passwords and fragments, and replace each nonempty query string with `redacted`. This applies to stored URL metadata, the captured request line, its search index entry and recording errors. Credential headers and common headers carrying links or redirects are masked. Capture bodies, paths and other headers can still contain secrets. Existing captures, logs and backups retain their original content.
 
 The console file manager and chat upload handler use filesystem operations rooted in the configured workspace. Workspace downloads use a binary attachment response. Editor saves replace the destination after the full content arrives. Keep the workspace on a dedicated volume when untrusted processes can create files there. Mounted directories and preexisting hard links can expose data that already appears inside the workspace.

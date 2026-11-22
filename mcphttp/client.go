@@ -99,7 +99,7 @@ func New(ctx context.Context, server, url string, headers map[string]string, _ b
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{Timeout: 120 * time.Second}
+	hc := &http.Client{Timeout: 120 * time.Second, CheckRedirect: checkMCPRedirect}
 	c := &Client{
 		server:   server,
 		url:      url,
@@ -121,7 +121,7 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	if err != nil {
 		return nil, err
 	}
-	hc := &http.Client{} // the SSE stream is intentionally long-lived.
+	hc := &http.Client{CheckRedirect: checkMCPRedirect} // the SSE stream is intentionally long-lived.
 	streamCtx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, sseURL, nil)
 	if err != nil {
@@ -143,7 +143,7 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 		return nil, fmt.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
 	}
 	reader := bufio.NewReader(resp.Body)
-	endpoint, err := readSSEEndpoint(reader, sseURL)
+	endpoint, err := readSSEEndpoint(reader, resp.Request.URL.String())
 	if err != nil {
 		resp.Body.Close()
 		cancel()
@@ -185,18 +185,18 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 		if candidate == "" {
 			continue
 		}
-		u, err := url.Parse(candidate)
+		b, err := url.Parse(base)
 		if err != nil {
-			return "", fmt.Errorf("mcp sse endpoint URL: %w", err)
+			return "", errors.New("invalid MCP base URL")
 		}
-		if !u.IsAbs() {
-			b, err := url.Parse(base)
-			if err != nil {
-				return "", err
-			}
-			candidate = b.ResolveReference(u).String()
+		u, err := b.Parse(candidate)
+		if err != nil {
+			return "", errors.New("invalid MCP message URL")
 		}
-		return candidate, nil
+		if !sameMCPOrigin(b, u) {
+			return "", errors.New("MCP message endpoint must use the configured origin")
+		}
+		return u.String(), nil
 	}
 }
 
