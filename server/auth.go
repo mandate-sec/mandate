@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -132,7 +133,9 @@ func readAuthRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 		writeErr(w, http.StatusRequestEntityTooLarge, "请求体过大")
 		return false
 	}
-	if err != nil || json.Unmarshal(body, dst) != nil {
+	// The JSON decoder accepts null for a struct and silently replaces invalid
+	// UTF-8 in strings. Both are inappropriate for credential documents.
+	if err != nil || !utf8.Valid(body) || bytes.Equal(bytes.TrimSpace(body), []byte("null")) || json.Unmarshal(body, dst) != nil {
 		writeErr(w, http.StatusBadRequest, "请求格式错误")
 		return false
 	}

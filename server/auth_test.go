@@ -125,6 +125,8 @@ func TestAuthEndpointsRejectInvalidBodiesBeforeDatabase(t *testing.T) {
 		}{
 			{"{}" + strings.Repeat(" ", 8191), 413},
 			{"{} {}", 400},
+			{" \tnull\n", 400},
+			{`{"password":"` + "\xff" + `"}`, 400},
 		} {
 			w := httptest.NewRecorder()
 			handler(w, httptest.NewRequest("POST", "/", strings.NewReader(tc.body)))
@@ -137,6 +139,11 @@ func TestAuthEndpointsRejectInvalidBodiesBeforeDatabase(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader("{}" + strings.Repeat(" ", 8190)))
 	if !readAuthRequest(w, r, &struct{}{}) {
 		t.Fatal("valid document exactly at the limit was rejected")
+	}
+	var credentials struct{ Password string }
+	r = httptest.NewRequest("POST", "/", strings.NewReader(`{"password":"密�碼"}`))
+	if !readAuthRequest(w, r, &credentials) || credentials.Password != "密�碼" {
+		t.Fatal("valid Unicode credential changed during parsing")
 	}
 }
 
