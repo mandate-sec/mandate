@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "sonner";
 
-import { sseUrl } from "@/lib/api";
+import { openEventStream } from "@/lib/api";
 import { isBtwCommand, type SideExchange, type SideHistory, sideAPI } from "@/lib/side-questions";
 
 // crypto.randomUUID is available only in secure contexts (https/localhost); degrade when accessed via IP+http.
@@ -128,7 +128,7 @@ export function useSideQuestions(parent: string | null) {
   useEffect(() => {
     if (!runningID) return;
     const version = epoch.current;
-    const stream = new EventSource(sseUrl(`/api/side-questions/${runningID}/events`));
+    const stream = openEventStream(`/api/side-questions/${runningID}/events`);
     stream.addEventListener("snapshot", (event) => {
       if (version !== epoch.current) return;
       try {

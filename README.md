@@ -14,6 +14,10 @@ python -c "import hashlib,secrets; t=secrets.token_hex(32); print('Setup token:'
 
 Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before starting Compose, or set the equivalent environment variable for a native server. Keep the setup token private. Open the setup page over loopback or a trusted HTTPS connection and enter the token with your chosen password. An unconfigured installation rejects setup requests. After the first account is claimed, discard the token and remove the digest from the service environment on its next restart. Existing installations continue to use their current password.
 
+## Browser sessions
+
+The bundled console uses same-origin cookies for event streams. Session tokens in URL query parameters are rejected. During local UI development, use the same hostname for both ports and set `MANDATE_STREAM_UI_ORIGIN` on the backend to the exact frontend origin (for example, `http://localhost:3000`). This grants that origin credentialed read access. Prefer same-origin routing in production. When upgrading, treat earlier access logs containing session URLs as sensitive until those sessions expire.
+
 ## Upstream documentation
 
 <p align="center">

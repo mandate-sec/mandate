@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { api, sseUrl } from "@/lib/api";
+import { api, openEventStream } from "@/lib/api";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
 
 /** Maximum time to wait for the new version to come up. An upgrade involves three
@@ -103,7 +103,7 @@ export function UpdateCard() {
   // Subscribe to update progress. SSE does not go through Next's /api rewrite (it buffers, so events never get through).
   const openStream = React.useCallback(
     (fromVersion: string) => {
-      const es = new EventSource(sseUrl("/api/update/stream"));
+      const es = openEventStream("/api/update/stream");
       es.onmessage = (ev) => {
         let p: UpdateProgress;
         try {
