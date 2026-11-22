@@ -57,6 +57,9 @@ func TestConsoleResponsePolicies(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		policy := w.Header().Get("Content-Security-Policy")
+		if strings.Contains(policy, "img-src 'self' data: blob:") != (path == "/") {
+			t.Fatalf("unexpected image policy for %s: %s", path, policy)
+		}
 		if !strings.Contains(policy, "frame-ancestors 'none'") || strings.Contains(policy, "sandbox") != strings.HasPrefix(path, "/api/") ||
 			w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Referrer-Policy") != "no-referrer" {
 			t.Fatal(path, w.Header())

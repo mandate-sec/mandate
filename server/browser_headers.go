@@ -14,6 +14,8 @@ func consoleBrowserHeaders(next http.Handler) http.Handler {
 		policy := "frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			policy += "; sandbox; default-src 'none'; form-action 'none'"
+		} else {
+			policy += "; img-src 'self' data: blob:"
 		}
 		h.Set("Content-Security-Policy", policy)
 		next.ServeHTTP(w, r)
