@@ -60,6 +60,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
+import { externalWebLink } from "@/lib/external-link";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -604,11 +605,12 @@ export default function AssetsPage() {
             {slice(tabData("service")).map((a) => {
               const isHttp = a.service_type === "http";
               const svc = a.service_name || (isHttp ? "http" : "") || a.service_type || "";
-              let domainCell: React.ReactNode = "—";
-              if (isHttp && a.url) {
+              let domainCell: React.ReactNode = a.domain || (isHttp && a.url) || "—";
+              const href = isHttp ? externalWebLink(a.url) : undefined;
+              if (href) {
                 domainCell = (
                   <a
-                    href={a.url}
+                    href={href}
                     target="_blank"
                     rel="noreferrer"
                     className="text-blue-600 hover:underline dark:text-blue-400"
@@ -616,8 +618,6 @@ export default function AssetsPage() {
                     {a.domain || a.url}
                   </a>
                 );
-              } else if (a.domain) {
-                domainCell = a.domain;
               }
               return (
                 <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>

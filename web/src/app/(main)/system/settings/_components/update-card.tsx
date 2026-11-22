@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { api, openEventStream } from "@/lib/api";
+import { externalWebLink } from "@/lib/external-link";
 import type { UpdateCheck, UpdateProgress } from "@/lib/types";
 
 /** Maximum time to wait for the new version to come up. An upgrade involves three
@@ -187,6 +188,7 @@ export function UpdateCard() {
   const downloading = !restarting && phase === "downloading";
   const pct = downloading ? Math.max(progress?.percent ?? 0, 0) : 100;
 
+  const releaseLink = externalWebLink(info?.html_url);
   return (
     // The settings page is a multi-column masonry layout; each card handles its own row spacing
     // and must not break across columns (see the comment in page.tsx).
@@ -220,9 +222,9 @@ export function UpdateCard() {
               </Badge>
             </>
           )}
-          {info?.html_url && (
+          {releaseLink && (
             <a
-              href={info.html_url}
+              href={releaseLink}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:underline"
