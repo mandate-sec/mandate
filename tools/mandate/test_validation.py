@@ -6,6 +6,20 @@ import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_rejection_is_single_line_and_bounded(self):
+        detail = "duplicate field: x\n\x1b[0m\u202ey" + "z" * 10000
+        message = mandate.rejection_message(ValueError(detail))
+        self.assertTrue(message.isprintable())
+        self.assertIn(r"\x1b", message)
+        self.assertLess(len(message), 300)
+
+    def test_oversized_trusted_key(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "public"
+            path.write_bytes(b"x" * (mandate.MAX_KEY_BYTES + 1))
+            with self.assertRaisesRegex(ValueError, "key file exceeds size limit"):
+                mandate.verify(Path(folder) / "unused", path, None)
+
     def test_approval_network_containment(self):
         import json
         expires = "2030-01-01T00:00:00Z"

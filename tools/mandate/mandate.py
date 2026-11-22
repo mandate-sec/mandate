@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 KEYS = Path.home() / ".mandate" / "keys"
 MAX_RECORD_BYTES = 1024 * 1024
+MAX_KEY_BYTES = 16 * 1024
 CHECKS = {"port_scan", "web_scan", "auth_bypass", "vuln_scan", "browser_capture"}
 
 
@@ -101,6 +102,22 @@ def write_new(path, data):
         f.write(data)
 
 
+def read_key(path):
+    with path.open("rb") as stream:
+        pem = stream.read(MAX_KEY_BYTES + 1)
+    if len(pem) > MAX_KEY_BYTES:
+        raise ValueError("key file exceeds size limit")
+    return pem
+
+
+def rejection_message(exc):
+    # Validation errors may quote fields supplied by an untrusted document.
+    detail = str(exc) or type(exc).__name__
+    excerpt = detail[:240]
+    safe = "".join(ch if ch.isprintable() else ascii(ch)[1:-1] for ch in excerpt)
+    return "Mandate rejected: " + safe + ("…" if len(detail) > len(excerpt) else "")
+
+
 def signed(obj, key):
     signature = base64.b64encode(key.sign(canonical(obj))).decode()
     data = canonical(dict(obj, signature=signature)) + b"\n"
@@ -156,7 +173,7 @@ def check_approval(obj, path):
 
 
 def verify(path, key_path, now, allow_expired=False):
-    key = ser.load_pem_public_key(key_path.read_bytes())
+    key = ser.load_pem_public_key(read_key(key_path))
     if not isinstance(key, Ed25519PublicKey):
         raise ValueError("expected Ed25519 trusted key")
     with path.open("rb") as stream:
@@ -216,11 +233,11 @@ def main():
             return
         print("Signature valid for the selected key:", obj["engagement"], "until", obj["expires"])
         return
-    key = ser.load_pem_private_key(args.key.read_bytes(), getpass.getpass("Signing passphrase: ").encode())
+    key = ser.load_pem_private_key(read_key(args.key), getpass.getpass("Signing passphrase: ").encode())
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("expected encrypted Ed25519 key")
     fp = fingerprint(key.public_key())
-    trusted = ser.load_pem_public_key(args.trusted_key.read_bytes())
+    trusted = ser.load_pem_public_key(read_key(args.trusted_key))
     if not isinstance(trusted, Ed25519PublicKey) or fingerprint(trusted) != fp:
         raise ValueError("signing key does not match trusted key")
     if args.cmd == "renew":
@@ -256,4 +273,4 @@ if __name__ == "__main__":
     try:
         main()
     except (OSError, ValueError, TypeError, RecursionError, InvalidSignature) as exc:
-        sys.exit("Mandate rejected: " + (str(exc) or type(exc).__name__))
+        sys.exit(rejection_message(exc))
