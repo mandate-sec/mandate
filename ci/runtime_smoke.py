@@ -1,5 +1,7 @@
 """Boot the built image and PostgreSQL on an internal network; no target scans."""
+import hashlib
 import json
+import secrets
 from pathlib import Path
 import subprocess
 import sys
@@ -44,6 +46,7 @@ def expect(result, status):
 
 
 try:
+    setup_token = secrets.token_hex(32)
     docker('network', 'create', '--internal', name)
     for volume in (data, keys):
         docker('volume', 'create', volume)
@@ -58,6 +61,7 @@ try:
         raise RuntimeError('PostgreSQL did not become ready')
     docker('run', '-d', '--name', app, '--network', name,
            '--security-opt', 'no-new-privileges:true', '--shm-size=1g',
+           '-e', 'MANDATE_SETUP_TOKEN_SHA256=' + hashlib.sha256(setup_token.encode()).hexdigest(),
            '-e', f'ARTEX_PG_DSN=postgres://artex:smoke-db-fixture@{pg}:5432/artex?sslmode=disable',
            '-v', data + ':/app/data', '-v', keys + ':/app/keys',
            '-v', str(Path(__file__).resolve().parent) + ':/ci:ro', IMAGE)
@@ -70,7 +74,8 @@ try:
     expect(api('/'), 200)
     expect(api('/api/tasks'), 401)
     password = 'ARTEX-smoke-fixture-2026!'
-    token = expect(api('/api/auth/init', 'POST', {'password': password}), 200)['token']
+    expect(api('/api/auth/init', 'POST', {'password': password}), 403)
+    token = expect(api('/api/auth/init', 'POST', {'password': password, 'setupToken': setup_token}), 200)['token']
     expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': 'wrong', 'captcha': 'smoke-canary'}), 401)
     expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': password}), 200)
     expect(api('/api/tasks', token=token), 200)

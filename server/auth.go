@@ -170,10 +170,15 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Password string `json:"password"`
+		Password   string `json:"password"`
+		SetupToken string `json:"setupToken"`
 	}
 	if err := decode(r, &req); err != nil || req.Password == "" {
 		writeErr(w, 400, "密码不能为空")
+		return
+	}
+	if !validSetupToken(req.SetupToken, os.Getenv("MANDATE_SETUP_TOKEN_SHA256")) {
+		writeErr(w, http.StatusForbidden, "Setup requires the installation owner's setup token.")
 		return
 	}
 	if msg := validatePassword(req.Password); msg != "" {
@@ -190,7 +195,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	// 这期间别的请求完全可能先把密码设好，而读检查本身也可能因故障而失效。
 	inserted, err := pg.InsertSettingIfAbsent(authPassKey, string(hash))
 	if err != nil {
-		writeErr(w, 500, "保存失败: "+err.Error())
+		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
 	if !inserted {
@@ -252,7 +257,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := pg.SetSetting(authPassKey, string(newHash)); err != nil {
-		writeErr(w, 500, "保存失败: "+err.Error())
+		writeErr(w, 503, errDataSourceUnavailable)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

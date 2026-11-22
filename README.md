@@ -4,6 +4,16 @@ This fork adds capture-header redaction, a restricted environment for Python cus
 
 Read [How authorization works](docs/AUTHORIZATION.md) for signer approval, verification, renewal, and current enforcement limits.
 
+## Claiming the first administrator account
+
+On the installation owner's machine, generate a fresh setup token and its SHA-256 digest for this installation.
+
+```sh
+python -c "import hashlib,secrets; t=secrets.token_hex(32); print('Setup token:',t); print('MANDATE_SETUP_TOKEN_SHA256='+hashlib.sha256(t.encode()).hexdigest())"
+```
+
+Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before starting Compose, or set the equivalent environment variable for a native server. Keep the setup token private. Open the setup page over loopback or a trusted HTTPS connection and enter the token with your chosen password. An unconfigured installation rejects setup requests. After the first account is claimed, discard the token and remove the digest from the service environment on its next restart. Existing installations continue to use their current password.
+
 ## Upstream documentation
 
 <p align="center">

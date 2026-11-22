@@ -14,6 +14,8 @@ Usage: python3 ci/e2e_binary.py /path/to/artex
 Requires: ARTEX_PG_DSN pointing at an empty database.
 """
 import gzip
+import hashlib
+import secrets
 import http.client
 import json
 import os
@@ -92,6 +94,8 @@ def main():
     base = f'http://127.0.0.1:{port}'
     with tempfile.TemporaryDirectory(prefix='artex-e2e-') as data:
         env = dict(os.environ, ARTEX_PG_DSN=dsn, NORMA_RIPGREP_NO_INSTALL='1')
+        setup_token = secrets.token_hex(32)
+        env['MANDATE_SETUP_TOKEN_SHA256'] = hashlib.sha256(setup_token.encode()).hexdigest()
         process = subprocess.Popen(
             [binary, '-addr', f'127.0.0.1:{port}', '-proxy', '', '-data', data],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -141,7 +145,7 @@ def main():
             # Authentication, task creation and listing over the same server.
             status, _, _ = request(base, '/api/tasks')
             assert status == 401, f'anonymous /api/tasks: expected 401, got {status}'
-            token = api(base, '/auth/init', 'POST', {'password': 'ARTEX-e2e-fixture-2026!'})['token']
+            token = api(base, '/auth/init', 'POST', {'password': 'ARTEX-e2e-fixture-2026!', 'setupToken': setup_token})['token']
             login = api(base, '/auth/login', 'POST', {'username': 'ARTEX', 'password': 'ARTEX-e2e-fixture-2026!'})
             assert login.get('token'), 'login returned no token'
             task = api(base, '/tasks', 'POST', {

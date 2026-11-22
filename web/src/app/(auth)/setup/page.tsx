@@ -13,6 +13,7 @@ import { auth } from "@/lib/auth";
 export default function SetupPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,7 +49,7 @@ export default function SetupPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password);
+      const { token } = await api.initPassword(password, setupToken);
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
@@ -94,6 +95,11 @@ export default function SetupPage() {
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="space-y-1.5">
+                <Label htmlFor="setupToken">Installation setup token</Label>
+                <Input id="setupToken" type="password" autoComplete="off" required autoFocus
+                  value={setupToken} onChange={(event) => setSetupToken(event.target.value)} />
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="password">New password</Label>
                 <Input
                   id="password"
@@ -101,7 +107,6 @@ export default function SetupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 8 characters"
-                  autoFocus
                   autoComplete="new-password"
                 />
               </div>
@@ -117,7 +122,7 @@ export default function SetupPage() {
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading || !password || !confirm}>
+              <Button type="submit" className="w-full" disabled={loading || !setupToken || !password || !confirm}>
                 {loading ? "Saving..." : "Set password and sign in"}
               </Button>
             </form>
