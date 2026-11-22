@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,6 +16,32 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func TestAuthRejectsWhenSessionLookupStalls(t *testing.T) {
+	store, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.SetMaxOpenConns(1)
+	conn, err := store.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*sessionCheckTimeout)
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/session-check", nil)
+	req.Header.Set("Authorization", "Bearer fixture")
+	s := &Server{m: &Manager{pg: &db.DB{DB: store}}}
+	w := httptest.NewRecorder()
+	s.requireAuth(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("protected handler ran while the session store was unavailable")
+	})).ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable || ctx.Err() != nil || store.Stats().WaitCount == 0 {
+		t.Fatalf("expected bounded pool wait: status=%d request error=%v", w.Code, ctx.Err())
+	}
+}
 
 func TestAdminPasswordComparisonByteLimit(t *testing.T) {
 	password := strings.Repeat("界", 24)

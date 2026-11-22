@@ -8,6 +8,8 @@ import (
 
 type streamSessionKey struct{}
 
+const sessionCheckTimeout = 3 * time.Second
+
 type streamSession struct {
 	expires time.Time
 	current func(context.Context) bool
@@ -65,7 +67,7 @@ func watchStreamSession(ctx context.Context, cancel context.CancelFunc, current 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			checkCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+			checkCtx, stop := context.WithTimeout(ctx, sessionCheckTimeout)
 			valid := current(checkCtx)
 			stop()
 			if !valid {

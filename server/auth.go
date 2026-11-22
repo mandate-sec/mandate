@@ -75,7 +75,9 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		if pg == nil {
 			return
 		}
-		generation, _, err := pg.GetSettingContext(r.Context(), "auth.session_generation")
+		checkCtx, stop := context.WithTimeout(r.Context(), sessionCheckTimeout)
+		generation, _, err := pg.GetSettingContext(checkCtx, "auth.session_generation")
+		stop()
 		if err != nil {
 			writeErr(w, 503, errDataSourceUnavailable)
 			return
