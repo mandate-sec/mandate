@@ -71,6 +71,8 @@ done
 read_config_json() {
   python3 - "$1" <<'PY'
 import json
+import os
+import stat
 import sys
 
 def unique(pairs):
@@ -82,8 +84,15 @@ def unique(pairs):
     return result
 
 try:
-    with open(sys.argv[1], encoding="utf-8") as source:
-        db = json.load(source, object_pairs_hook=unique)["database"]
+    limit = 1 << 20  # Same config.json limit as the server.
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(sys.argv[1], flags), "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValueError()
+        raw = source.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError()
+    db = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)["database"]
     if not isinstance(db, dict):
         raise ValueError()
     fields = []
