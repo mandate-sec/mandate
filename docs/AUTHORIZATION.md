@@ -30,6 +30,7 @@ The reviewer keeps one grant per signer and engagement under administrator-contr
   "key_fingerprint": "SHA256:<replace with confirmed fingerprint>",
   "targets": ["staging.example.org", "192.0.2.0/28"],
   "checks": ["web_scan"],
+  "excluded": ["192.0.2.9", "auth_bypass"],
   "max_concurrency": 1,
   "expires": "2026-12-05T00:00:00Z"
 }
@@ -38,5 +39,7 @@ The reviewer keeps one grant per signer and engagement under administrator-contr
 The engagement name must match the signed record exactly, including capitalization. To upgrade an older grant, the reviewer must confirm the intended engagement against the original authorization and add its name to the trusted grant file. Verification rejects grants missing this field. Existing signed records retain their signatures.
 
 Run `python mandate.py verify --file engagement.json --trusted-key approved/owner.pub --approval approved/staging.json`. The check accepts exact hostnames case-insensitively and IPs or subnets contained in an approved network of the same address family. Write networks using a decimal prefix length, such as `192.0.2.0/24`. Verification rejects dotted netmasks, wildcard masks, and zero-padded prefixes in grants and signed records. For an older record using those forms, confirm the intended range with the owner and issue a replacement. It performs no DNS lookups. Every requested target and check must fit, even if the record includes exclusions. The record must also fit the concurrency ceiling and expiry. Use this check only for permission that can be represented by these fields. Review other contractual restrictions separately.
+
+The optional `excluded` list in a grant names targets and check types that must also appear in the signed record’s `scope.excluded` list. Equivalent IP or CIDR spellings and hostname capitalization are accepted. The signer can add narrower limits by listing additional exclusions. Grants created without this field continue to work.
 
 The reviewer can withdraw a grant by removing it from the trusted configuration. There is no revocation service or runtime action gate. If a signing key is compromised, stop accepting its public key on each reviewing machine and distribute a newly approved key independently. Copies of the old record will still verify wherever the old key is trusted until they expire.

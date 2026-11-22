@@ -169,11 +169,24 @@ def signed(obj, key):
     return data
 
 
+def exclusion_key(value):
+    if not isinstance(value, str):
+        raise ValueError("invalid approved exclusion")
+    if value in CHECKS:
+        return value
+    target(value)
+    try:
+        return ipaddress.ip_network(value)
+    except ValueError:
+        return value.lower()
+
+
 def check_approval(obj, path):
     """Compare a verified record with a grant provisioned by its reviewer."""
     raw = read_regular_file(path, 65536, "approval exceeds 64 KiB")
     grant = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
-    exact(grant, "engagement key_fingerprint targets checks max_concurrency expires")
+    fields = "engagement key_fingerprint targets checks max_concurrency expires"
+    exact(grant, fields + " excluded" if isinstance(grant, dict) and "excluded" in grant else fields)
     if grant["engagement"] != obj["engagement"]:
         raise ValueError("approval is for a different engagement")
     if grant["key_fingerprint"] != obj["authorized_by"]["key_fingerprint"]:
@@ -188,6 +201,14 @@ def check_approval(obj, path):
         raise ValueError("invalid approved checks")
     if not set(obj["scope"]["checks"]).issubset(checks):
         raise ValueError("record requests an unapproved check")
+    if "excluded" in grant:
+        required = grant["excluded"]
+        if not isinstance(required, list):
+            raise ValueError("expected a list of approved exclusions")
+        exclusions = {exclusion_key(value) for value in required}
+        record_exclusions = {exclusion_key(value) for value in obj["scope"]["excluded"]}
+        if not exclusions.issubset(record_exclusions):
+            raise ValueError("record omits a required exclusion")
     targets = grant["targets"]
     if not isinstance(targets, list) or not 1 <= len(targets) <= 256:
         raise ValueError("expected 1 to 256 approved targets")

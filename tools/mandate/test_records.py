@@ -19,13 +19,25 @@ class Records(unittest.TestCase):
             self.assertIn(b"ENCRYPTED PRIVATE KEY",private.read_bytes())
             now=datetime.now(timezone.utc)
             expiry=(now+timedelta(days=1)).isoformat()
-            run("create","--engagement","local","--targets","localhost","--checks","web_scan","--name","Local","--email","local@example.org","--expires",expiry)
+            run("create","--engagement","local","--targets","localhost","--checks","web_scan","--name","Local","--email","local@example.org","--expires",expiry,
+                "--excluded", "Monitoring.Example,2001:db8::1,auth_bypass")
             run("verify")
             grant = root / "approval.json"
             approval = dict(engagement="local", key_fingerprint=json.loads(record.read_text())["authorized_by"]["key_fingerprint"],
                             targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
             grant.write_text(json.dumps(approval))
             run("verify", "--approval", str(grant))
+            excludes = ["monitoring.example", "2001:0db8:0:0:0:0:0:1/128", "auth_bypass"]
+            grant.write_text(json.dumps(approval | {"excluded": excludes}))
+            run("verify", "--approval", str(grant))
+            grant.write_text(json.dumps(approval | {"excluded": excludes + ["private.example"]}))
+            with self.assertRaisesRegex(ValueError, "required exclusion"):
+                run("verify", "--approval", str(grant))
+            for malformed in ("auth_bypass", [False], ["2001:db8::/064"]):
+                grant.write_text(json.dumps(approval | {"excluded": malformed}))
+                with self.assertRaises(ValueError):
+                    run("verify", "--approval", str(grant))
+            grant.write_text(json.dumps(approval))
             # Model a grant read that finishes exactly when the record expires.
             class Clock(datetime):
                 @classmethod
