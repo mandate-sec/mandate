@@ -45,3 +45,4 @@ This record covers 31 findings addressed in the fork through commit `bfd6d01`. N
 | 29 | Global proxy validation errors and startup logs could disclose credentials embedded in a rejected proxy URL | [162d2d6](https://github.com/mandate-sec/mandate/commit/162d2d68f79d90b9fac623519270d0b6e2c2d2c6) |
 | 30 | Database startup errors could expose passwords from malformed PostgreSQL connection strings or URL query parameters | [6e08d12](https://github.com/mandate-sec/mandate/commit/6e08d1220d4788a9c06124184304a6bd94198884) |
 | 31 | Viewing Markdown findings, reports or transcripts could automatically contact an image host selected by the content author | [bfd6d01](https://github.com/mandate-sec/mandate/commit/bfd6d0198f3abd65ac0432352d4f3136e93e0712) |
+| 32 | Findings CSV exports allowed untrusted text to be interpreted as spreadsheet formulas | [f9cd005](https://github.com/mandate-sec/mandate/commit/f9cd005598508ddb51ad080d6060af1c098352ca) |
