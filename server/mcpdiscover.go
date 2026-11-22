@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -49,21 +50,21 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error {
 	cl, err := connectMCP(ctx, m)
 	if err != nil {
-		return err
+		return errors.New("could not connect to the configured MCP server; check its connection settings")
 	}
 	defer cl.Close()
 	ts, err := cl.Tools(ctx)
 	if err != nil {
-		return err
+		return errors.New("MCP server did not return a usable tool list")
 	}
 	tools := make([]db.MCPTool, 0, len(ts))
 	for _, t := range ts {
 		tools = append(tools, db.MCPTool{Name: t.Name(), Description: t.Description()})
 	}
 	if err := s.m.pg.SaveMCPTools(m.ID, tools); err != nil {
-		return err
+		return errors.New("could not store the MCP tool list")
 	}
-	log.Printf("[mcp] %s 发现 %d 个工具并已缓存", m.Name, len(tools))
+	log.Printf("[mcp] server %d: cached %d tools", m.ID, len(tools))
 	return nil
 }
 
@@ -74,7 +75,7 @@ func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error
 func (s *Server) discoverEmptyMCPsOnStartup() {
 	servers, err := s.m.pg.ListMCP()
 	if err != nil {
-		log.Printf("[mcp] 启动自动发现: 读取列表失败: %v", err)
+		log.Print("[mcp] could not read the configured server list")
 		return
 	}
 	for _, m := range servers {
@@ -83,7 +84,7 @@ func (s *Server) discoverEmptyMCPsOnStartup() {
 		}
 		ctx, cancel := context.WithTimeout(s.ctx, 90*time.Second)
 		if err := s.discoverAndCacheMCP(ctx, m); err != nil {
-			log.Printf("[mcp] 启动自动发现 %s 失败: %v", m.Name, err)
+			log.Printf("[mcp] startup discovery for server %d: %v", m.ID, err)
 		}
 		cancel()
 	}
