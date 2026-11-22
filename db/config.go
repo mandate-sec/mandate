@@ -815,7 +815,7 @@ type MCPServer struct {
 	Env       json.RawMessage `json:"env"`
 	URL       string          `json:"url,omitempty"`
 	Enabled   bool            `json:"enabled"`
-	Insecure  bool            `json:"insecure"` // http: skip TLS cert verification (self-signed servers, issue #108)
+	Insecure  bool            `json:"insecure"`        // legacy flag, ignored by clients and rejected on save
 	Tools     []string        `json:"tools,omitempty"` // cached tool names (mcp_tools_cache)
 }
 
@@ -909,6 +909,9 @@ ON CONFLICT (server_id, tool_name) DO UPDATE SET description=EXCLUDED.descriptio
 }
 
 func (d *DB) SaveMCP(m *MCPServer) (int64, error) {
+	if m.Insecure {
+		return 0, errors.New("TLS certificate verification is required")
+	}
 	args, env := string(m.Args), string(m.Env)
 	if args == "" {
 		args = "[]"

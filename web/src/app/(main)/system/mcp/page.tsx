@@ -31,7 +31,6 @@ type FormState = {
   args: string;
   url: string;
   env: string;
-  insecure: boolean;
 };
 const emptyForm: FormState = {
   name: "",
@@ -40,7 +39,6 @@ const emptyForm: FormState = {
   args: "",
   url: "",
   env: "",
-  insecure: false,
 };
 
 export default function MCPPage() {
@@ -116,7 +114,6 @@ export default function MCPPage() {
       args: (s.args ?? []).join(" "),
       url: s.url ?? "",
       env: envToText(s.env),
-      insecure: s.insecure ?? false,
     });
     setTab("config");
     setOpen(true);
@@ -157,7 +154,7 @@ export default function MCPPage() {
               command: "",
               args: [] as string[],
               env: parseEnv(form.env), // In remote mode env holds request headers
-              insecure: form.insecure,
+              insecure: false,
             }
           : {
               transport: "stdio" as const,
@@ -299,13 +296,6 @@ export default function MCPPage() {
               value={form.url}
               onChange={(e) => setF({ url: e.target.value })}
             />
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={form.insecure}
-                onCheckedChange={(v) => setF({ insecure: v === true })}
-              />
-              Skip TLS certificate verification (self-signed certificates)
-            </label>
           </div>
         )}
         <div className="grid gap-2">

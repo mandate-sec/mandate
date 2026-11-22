@@ -266,7 +266,6 @@ func mcpSchema(withID bool) map[string]any {
 		"env":       map[string]any{"type": "object", "description": "环境变量 {KEY:VALUE}"},
 		"url":       strParam("http/sse 的 URL"),
 		"enabled":   map[string]any{"type": "boolean", "description": "是否启用(默认 true)"},
-		"insecure":  map[string]any{"type": "boolean", "description": "http: 跳过 TLS 证书校验(自签证书时置 true, 默认 false)"},
 	}
 	required := []string{"name", "transport"}
 	if withID {

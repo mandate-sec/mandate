@@ -12,7 +12,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,17 +93,13 @@ func normalizeHeaders(headers map[string]string) (map[string]string, error) {
 
 // New connects to a remote MCP endpoint and performs the initialize handshake.
 // headers are sent on every request (Authorization, custom API keys, …).
-// When insecure is true, TLS certificate verification is skipped so servers that
-// present a self-signed certificate can still be reached (issue #108).
-func New(ctx context.Context, server, url string, headers map[string]string, insecure bool) (*Client, error) {
+// HTTPS always verifies the peer, including for configurations with the legacy insecure flag.
+func New(ctx context.Context, server, url string, headers map[string]string, _ bool) (*Client, error) {
 	cleanHeaders, err := normalizeHeaders(headers)
 	if err != nil {
 		return nil, err
 	}
 	hc := &http.Client{Timeout: 120 * time.Second}
-	if insecure {
-		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
 	c := &Client{
 		server:   server,
 		url:      url,
@@ -121,15 +116,12 @@ func New(ctx context.Context, server, url string, headers map[string]string, ins
 // NewSSE connects to the legacy MCP SSE transport: a long-lived GET /sse
 // announces a per-session POST /message endpoint, while JSON-RPC responses are
 // delivered asynchronously as SSE message events.
-func NewSSE(ctx context.Context, server, sseURL string, headers map[string]string, insecure bool) (*Client, error) {
+func NewSSE(ctx context.Context, server, sseURL string, headers map[string]string, _ bool) (*Client, error) {
 	cleanHeaders, err := normalizeHeaders(headers)
 	if err != nil {
 		return nil, err
 	}
 	hc := &http.Client{} // the SSE stream is intentionally long-lived.
-	if insecure {
-		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	}
 	streamCtx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, sseURL, nil)
 	if err != nil {

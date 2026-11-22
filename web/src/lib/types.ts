@@ -1177,7 +1177,7 @@ export interface MCPServer {
   env: Record<string, string>;
   url?: string;
   enabled: boolean;
-  insecure?: boolean; // http: skip TLS cert verification (self-signed servers)
+  insecure?: boolean; // Legacy stored value. HTTPS clients always verify the certificate.
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 

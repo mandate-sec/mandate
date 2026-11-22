@@ -7,7 +7,6 @@
 package enrich
 
 import (
-	"crypto/tls"
 	"html"
 	"io"
 	"log"
@@ -87,13 +86,9 @@ func New(as *db.AssetStore, proxy func() string, workers int) *Engine {
 	return e
 }
 
-// buildClient returns an HTTP client that dials via the recording proxy (resolved
-// per-request via proxy(), so the traffic-capture toggle applies live) and skips
-// TLS verification (the proxy re-signs with its MITM CA; targets are often
-// self-signed — this is a pentest probe).
+// buildClient resolves the proxy per request and uses the system TLS trust roots.
 func buildClient(proxy func() string) *http.Client {
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		DisableKeepAlives:   true,
 		TLSHandshakeTimeout: httpTimeout,
 	}

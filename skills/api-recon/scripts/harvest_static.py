@@ -14,12 +14,12 @@ Static SPA bundle harvester. Framework-agnostic; tuned for webpack + Vite.
      micro-frontend runtimes, each with its own publicPath.
   3. Extract API endpoints and route paths from all downloaded JS.
 
-Stdlib only. TLS verification is disabled (recon against self-signed/internal hosts).
+Stdlib only. HTTPS uses certificate and hostname verification.
 """
 import sys, os, re, ssl, json, urllib.request, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
-CTX = ssl.create_default_context(); CTX.check_hostname = False; CTX.verify_mode = ssl.CERT_NONE
+CTX = ssl.create_default_context()
 UA = "Mozilla/5.0 (spa-api-recon)"
 
 def fetch(url, binary=False):
