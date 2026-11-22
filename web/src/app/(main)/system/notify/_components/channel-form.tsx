@@ -32,7 +32,7 @@ function inputType(kind: FieldKind): "text" | "password" | "number" {
 //
 // Masked fields are the one subtlety here: the input does **not** display the masked value itself, only a
 // "Saved" hint. This keeps the UI to a single rule — text in the box means the user entered it,
-// an empty box means an empty value. Putting "__masked__:…abc123" into the input would make users think
+// an empty box means an empty value. Putting "__masked__" into the input would make users think
 // it is placeholder text they need to delete, and more likely to accidentally clear credentials.
 export function ConfigField({
   def,
@@ -47,9 +47,7 @@ export function ConfigField({
 }) {
   const id = `n-cfg-${def.key}`;
   const raw = asText(value);
-  // The masked value echoed by the backend: like "__masked__:…abc123", whose tail is a recognizable fragment of the original.
   const masked = isSecret && raw.startsWith("__masked__");
-  const maskedTail = masked ? (raw.split("…")[1] ?? "") : "";
 
   if (def.kind === "switch") {
     return (
@@ -120,7 +118,7 @@ export function ConfigField({
   const hint = masked ? (
     <p className="text-muted-foreground flex items-center gap-1 text-xs">
       <CheckIcon className="size-3" />
-      Saved{maskedTail ? ` (tail ${maskedTail})` : ""} · enter a new value to overwrite, clear to remove it
+      Saved · enter a new value to overwrite, clear to remove it
     </p>
   ) : (
     def.help && <p className="text-muted-foreground text-xs">{def.help}</p>

@@ -6,34 +6,20 @@ import (
 	"testing"
 )
 
-func TestMaskedValueHidesBodyButKeepsTailHint(t *testing.T) {
-	const secret = "https://oapi.dingtalk.com/robot/send?access_token=abcdef123456"
-	got := MaskedValue(secret)
-	if strings.Contains(got, "abcdef123456") {
-		t.Fatalf("掩码值泄露了完整凭据: %q", got)
-	}
-	if strings.Contains(got, "oapi.dingtalk.com") {
-		t.Fatalf("掩码值不应暴露地址主体: %q", got)
-	}
-	// 末 6 位要保留，用户才能认出是哪个机器人。
-	if !strings.HasSuffix(got, "123456") {
-		t.Fatalf("应保留末 6 位作为辨识提示: %q", got)
-	}
-	if !IsMasked(got) {
-		t.Fatalf("掩码值必须能被 IsMasked 识别: %q", got)
-	}
-}
-
-func TestMaskedValueShortSecretGivesNoHint(t *testing.T) {
-	// 短凭据如果也暴露末 6 位，等于把整个凭据暴露出去。
-	for _, s := range []string{"abc", "abcdef", ""} {
-		got := MaskedValue(s)
-		if got != MaskedPrefix {
-			t.Fatalf("长度 %d 的凭据不应给出尾部提示，得到 %q", len(s), got)
+func TestCredentialMasksDoNotDiscloseSuffixes(t *testing.T) {
+	for _, secret := range []string{"", "1234567", "多字节密码", "long-token-secret"} {
+		cfg := map[string]any{"password": secret}
+		if got := MaskConfig(KindEmail, cfg)["password"]; got != MaskedPrefix {
+			t.Fatal("SMTP password should have a constant placeholder")
 		}
-		if s != "" && strings.Contains(got, s) {
-			t.Fatalf("掩码值包含了原值: %q", got)
+		if MaskedValue(secret) != MaskedPrefix {
+			t.Fatal("credential helper returned a variable placeholder")
 		}
+	}
+	stored := map[string]any{"password": "stored-secret"}
+	updated, err := PrepareConfigUpdate(KindEmail, stored, map[string]any{"password": MaskedPrefix + ":…secret"})
+	if err != nil || updated["password"] != stored["password"] {
+		t.Fatal("legacy placeholder must preserve the stored credential")
 	}
 }
 

@@ -8,25 +8,11 @@ import (
 
 // MaskedPrefix 是掩码值的标记前缀。API 回显凭据时用带此前缀的值替换真实内容，
 // 更新接口收到带此前缀的值即理解为「保持库中原值不变」。
-//
-// 用前缀而不是空串或某个固定常量，是为了能顺带带上一点可辨识信息
-// （见 MaskedValue），让用户区分得出「这是哪个机器人」而不必重新粘贴密钥。
 const MaskedPrefix = "__masked__"
 
-// MaskedValue 生成一个掩码值：
-//
-//	"__masked__"              原值太短，不给任何提示
-//	"__masked__:…ab12cd"      带上原值末 6 位作为辨识提示
-//
-// 只暴露末 6 位是刻意选择的：Webhook 地址的辨识信息在末段（如企业微信的 key、
-// 飞书的机器人 id），而前缀部分各机器人相同、没有辨识价值。末 6 位不足以
-// 还原凭据，但足以让配置者认出「是我那个群」。
-func MaskedValue(secret string) string {
-	if len(secret) <= 6 {
-		return MaskedPrefix
-	}
-	return MaskedPrefix + ":…" + secret[len(secret)-6:]
-}
+// MaskedValue returns the configured-secret placeholder without disclosing any
+// characters. Older clients can still submit their cached placeholders.
+func MaskedValue(_ string) string { return MaskedPrefix }
 
 // IsMasked 报告某个值是否为掩码值（即接口回显后未被修改）。
 func IsMasked(v string) bool { return strings.HasPrefix(v, MaskedPrefix) }
@@ -53,10 +39,6 @@ func MaskConfig(kind string, cfg map[string]any) map[string]any {
 		}
 		// headers 这类嵌套结构整体按一个凭据处理：逐个子键判断需要每个渠道
 		// 再声明一套「哪些子键是凭据」的规则，复杂度远超收益。
-		if s, ok := v.(string); ok {
-			out[k] = MaskedValue(s)
-			continue
-		}
 		out[k] = MaskedPrefix
 	}
 	return out
