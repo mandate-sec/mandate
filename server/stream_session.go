@@ -34,6 +34,7 @@ func (w sessionStreamWriter) Flush() {
 
 // Long-lived responses must recheck the generation shared by all console instances.
 func authenticatedStream(next http.HandlerFunc) http.HandlerFunc {
+	origin := streamUIOrigin()
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, ok := r.Context().Value(streamSessionKey{}).(streamSession)
 		if !ok || session.current == nil || !time.Now().Before(session.expires) {
@@ -47,6 +48,10 @@ func authenticatedStream(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithDeadline(r.Context(), session.expires)
 		defer cancel()
+		if origin != "" && r.Method == http.MethodGet && r.Header.Get("Origin") == origin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 		go watchStreamSession(ctx, cancel, session.current, 15*time.Second)
 		next(sessionStreamWriter{w, flusher, ctx}, r.WithContext(ctx))
 	}
