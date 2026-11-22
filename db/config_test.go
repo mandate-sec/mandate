@@ -112,6 +112,15 @@ func TestConfigStores(t *testing.T) {
 	if !found {
 		t.Fatal("saved profile missing from list")
 	}
+	for _, edit := range []LLMProfile{
+		{ID: pid, Format: "openai", BaseURL: "https://alternate.invalid"},
+		{ID: pid, Format: "openai", Proxy: "http://proxy.invalid"},
+		{ID: pid, Format: "anthropic"},
+	} {
+		if _, err := d.SaveProfile(&edit); !errors.Is(err, ErrLLMProfileKeyRequired) {
+			t.Fatalf("changing a credential destination requires an explicit key: %v", err)
+		}
+	}
 	for _, key := range []string{"1234", ""} {
 		if _, err := d.SaveProfile(&LLMProfile{ID: pid, Name: "t-default", Format: "openai", Model: "gpt-x", APIKey: key}); err != nil {
 			t.Fatal(err)

@@ -1819,6 +1819,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		p.MaxTokensField = ""
 	}
 	id, err := pg.SaveProfile(&p)
+	if errors.Is(err, db.ErrLLMProfileKeyRequired) {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -1992,6 +1996,10 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" && req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			if p.Format != req.Provider || p.BaseURL != req.BaseURL || p.Proxy != req.Proxy {
+				writeErr(w, 400, db.ErrLLMProfileKeyRequired.Error())
+				return
+			}
 			apiKey = p.APIKey
 		}
 	}
@@ -2056,7 +2064,12 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 			transport.Proxy = http.ProxyURL(pu)
 		}
 	}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	client := &http.Client{Transport: transport, Timeout: 30 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 || next.URL.Scheme != via[0].URL.Scheme || next.URL.Host != via[0].URL.Host {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}}
 
 	// Try each candidate; return the first that yields a non-empty model list.
 	var lastErr string

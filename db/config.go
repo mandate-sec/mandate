@@ -168,10 +168,15 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULL,$7,$8,$9,$10,$11
 		return id, err
 	}
 	if p.APIKey == "" {
-		_, err := d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,rate_per_second=$6,rate_per_minute=$7,context_window_k=$8,reasoning_effort=$9,priority=$10,pool_exclude=$11,thinking_type=$12,streaming=$13,max_tokens=$14,max_tokens_field=$15,session_header_key=$16,retry_connect_attempts=$17,retry_connect_interval_ms=$18,retry_empty_attempts=$19,retry_empty_interval_ms=$20,retry_stream_attempts=$21,retry_stream_interval_ms=$22 WHERE id=$23`,
+		var updated int64
+		err := d.QueryRow(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,rate_per_second=$6,rate_per_minute=$7,context_window_k=$8,reasoning_effort=$9,priority=$10,pool_exclude=$11,thinking_type=$12,streaming=$13,max_tokens=$14,max_tokens_field=$15,session_header_key=$16,retry_connect_attempts=$17,retry_connect_interval_ms=$18,retry_empty_attempts=$19,retry_empty_interval_ms=$20,retry_stream_attempts=$21,retry_stream_interval_ms=$22 WHERE id=$23 AND (COALESCE(api_key,'')='' OR
+(format=$2 AND COALESCE(base_url,'')=$3 AND COALESCE(proxy,'')=$4)) RETURNING id`,
 			p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.Priority, p.PoolExclude, p.ThinkingType, p.Streaming, p.MaxTokens, p.MaxTokensField, p.SessionHeaderKey,
-			r.Connect.Attempts, r.Connect.IntervalMS, r.Empty.Attempts, r.Empty.IntervalMS, r.Stream.Attempts, r.Stream.IntervalMS, p.ID)
-		return p.ID, err
+			r.Connect.Attempts, r.Connect.IntervalMS, r.Empty.Attempts, r.Empty.IntervalMS, r.Stream.Attempts, r.Stream.IntervalMS, p.ID).Scan(&updated)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrLLMProfileKeyRequired
+		}
+		return updated, err
 	}
 	_, err := d.Exec(`UPDATE llm_profiles SET name=$1,format=$2,base_url=NULLIF($3,''),proxy=NULLIF($4,''),model=$5,api_key=$6,api_key_hint=NULL,rate_per_second=$7,rate_per_minute=$8,context_window_k=$9,reasoning_effort=$10,priority=$11,pool_exclude=$12,thinking_type=$13,streaming=$14,max_tokens=$15,max_tokens_field=$16,session_header_key=$17,retry_connect_attempts=$18,retry_connect_interval_ms=$19,retry_empty_attempts=$20,retry_empty_interval_ms=$21,retry_stream_attempts=$22,retry_stream_interval_ms=$23 WHERE id=$24`,
 		p.Name, p.Format, p.BaseURL, p.Proxy, p.Model, p.APIKey, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.Priority, p.PoolExclude, p.ThinkingType, p.Streaming, p.MaxTokens, p.MaxTokensField, p.SessionHeaderKey,
@@ -180,6 +185,7 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULL,$7,$8,$9,$10,$11
 }
 
 var (
+	ErrLLMProfileKeyRequired       = errors.New("profile unavailable or destination changed; enter an API key for this destination")
 	ErrActiveLLMProfileDelete      = errors.New("cannot delete the active LLM profile; activate another profile first")
 	ErrLLMProfileReferencesChanged = errors.New("LLM profile references changed while deleting; retry the request")
 	ErrLLMProfileNotFound          = errors.New("LLM profile not found")

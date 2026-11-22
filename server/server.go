@@ -1304,6 +1304,14 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// A stored model credential is bound to the configured provider, endpoint and proxy.
+func storedModelKey(requested, saved agent.Config) string {
+	if requested.Format != saved.Format || requested.BaseURL != saved.BaseURL || requested.Proxy != saved.Proxy {
+		return ""
+	}
+	return saved.APIKey
+}
+
 // setLLM configures the LLM at runtime. A blank api_key keeps the existing key.
 func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -1334,7 +1342,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
+		cfg.APIKey = storedModelKey(cfg, s.llmCfg)
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
@@ -1401,16 +1409,16 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			if cfg.APIKey == "" {
-				cfg.APIKey = p.APIKey
+				cfg.APIKey = storedModelKey(cfg, agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy))
 			}
 			if cfg.SessionHeaderKey == "" {
 				cfg.SessionHeaderKey = p.SessionHeaderKey
 			}
 		}
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && req.ProfileID == nil {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey
+		cfg.APIKey = storedModelKey(cfg, s.llmCfg)
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
