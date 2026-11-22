@@ -77,9 +77,15 @@ jobs:
           PGDATABASE: postgres
         run: |
           psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz DEFAULT now())'
-          for pass in fixture-first fixture-second; do
+          for pass in fixture-first fixture-second "$(printf 'é%.0s' {1..36})"; do
             bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -p "$pass" -y
             generation=$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")
             [[ "$generation" =~ ^[a-f0-9]{64}$ && "$generation" != "${previous:-}" ]]
             previous=$generation
+          done
+          for invalid in short "$(printf '%073d' 0)" "$(printf 'é%.0s' {1..37})"; do
+            if bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -p "$invalid" -y; then
+              exit 1
+            fi
+            [[ "$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")" == "$previous" ]]
           done

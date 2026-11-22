@@ -144,6 +144,12 @@ export ARTEX_RESET_NEWPASS="$NEWPASS"
 SQL=$(cat <<SQL
 \\set ON_ERROR_STOP on
 \\getenv newpw ARTEX_RESET_NEWPASS
+SELECT char_length(:'newpw') >= 8 AND octet_length(convert_to(:'newpw', 'UTF8')) <= 72 AS password_valid
+\\gset
+\\if :password_valid
+\\else
+DO 'BEGIN RAISE EXCEPTION ''Password requires at least 8 characters and at most 72 UTF-8 bytes''; END';
+\\endif
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 INSERT INTO settings(key, value)
 VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST))),
