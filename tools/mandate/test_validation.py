@@ -48,9 +48,9 @@ class ValidationTests(unittest.TestCase):
     def test_approval_network_containment(self):
         import json
         expires = "2030-01-01T00:00:00Z"
-        grant = dict(key_fingerprint="test", targets=["192.0.2.0/28", "2001:db8::/64"],
+        grant = dict(engagement="Local review", key_fingerprint="test", targets=["192.0.2.0/28", "2001:db8::/64"],
                      checks=["web_scan"], max_concurrency=2, expires=expires)
-        record = dict(authorized_by={"key_fingerprint": "test"}, constraints={"max_concurrency": 2},
+        record = dict(engagement="Local review", authorized_by={"key_fingerprint": "test"}, constraints={"max_concurrency": 2},
                       scope={"checks": ["web_scan"]}, expires=expires)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "grant.json"

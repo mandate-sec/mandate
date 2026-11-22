@@ -26,6 +26,7 @@ The reviewer keeps one grant per signer and engagement under administrator-contr
 
 ```json
 {
+  "engagement": "Staging review",
   "key_fingerprint": "SHA256:<replace with confirmed fingerprint>",
   "targets": ["staging.example.org", "192.0.2.0/28"],
   "checks": ["web_scan"],
@@ -33,6 +34,8 @@ The reviewer keeps one grant per signer and engagement under administrator-contr
   "expires": "2026-12-05T00:00:00Z"
 }
 ```
+
+The engagement name must match the signed record exactly, including capitalization. To upgrade an older grant, the reviewer must confirm the intended engagement against the original authorization and add its name to the trusted grant file. Verification rejects grants missing this field. Existing signed records retain their signatures.
 
 Run `python mandate.py verify --file engagement.json --trusted-key approved/owner.pub --approval approved/staging.json`. The check accepts exact hostnames case-insensitively and IPs or subnets contained in an approved network of the same address family. It performs no DNS lookups. Every requested target and check must fit, even if the record includes exclusions. The record must also fit the concurrency ceiling and expiry. Use this check only for permission that can be represented by these fields. Review other contractual restrictions separately.
 

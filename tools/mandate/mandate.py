@@ -152,7 +152,9 @@ def check_approval(obj, path):
     if len(raw) > 65536:
         raise ValueError("approval exceeds 64 KiB")
     grant = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
-    exact(grant, "key_fingerprint targets checks max_concurrency expires")
+    exact(grant, "engagement key_fingerprint targets checks max_concurrency expires")
+    if grant["engagement"] != obj["engagement"]:
+        raise ValueError("approval is for a different engagement")
     if grant["key_fingerprint"] != obj["authorized_by"]["key_fingerprint"]:
         raise ValueError("approval is for a different signer")
     if timestamp(obj["expires"]) > timestamp(grant["expires"]):

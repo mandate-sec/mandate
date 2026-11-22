@@ -22,7 +22,7 @@ class Records(unittest.TestCase):
             run("create","--engagement","local","--targets","localhost","--checks","web_scan","--name","Local","--email","local@example.org","--expires",expiry)
             run("verify")
             grant = root / "approval.json"
-            approval = dict(key_fingerprint=json.loads(record.read_text())["authorized_by"]["key_fingerprint"],
+            approval = dict(engagement="local", key_fingerprint=json.loads(record.read_text())["authorized_by"]["key_fingerprint"],
                             targets=["LOCALHOST"], checks=["web_scan"], max_concurrency=1, expires=expiry)
             grant.write_text(json.dumps(approval))
             run("verify", "--approval", str(grant))
@@ -41,7 +41,10 @@ class Records(unittest.TestCase):
             with patch.object(mandate, "datetime", Clock), patch.object(mandate, "check_approval", delayed_approval):
                 with self.assertRaisesRegex(ValueError, "validity window"):
                     run("verify", "--approval", str(grant))
-            for change in ({"targets": ["other.example"]}, {"checks": []}, {"max_concurrency": True},
+            grant.write_text(json.dumps({k: v for k, v in approval.items() if k != "engagement"}))
+            with self.assertRaisesRegex(ValueError, "expected fields"):
+                run("verify", "--approval", str(grant))
+            for change in ({"engagement": "other"}, {"targets": ["other.example"]}, {"checks": []}, {"max_concurrency": True},
                            {"key_fingerprint": "other"}, {"expires": now.isoformat()}):
                 with self.subTest(change=change):
                     grant.write_text(json.dumps(approval | change))
