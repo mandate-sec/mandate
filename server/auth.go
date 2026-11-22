@@ -244,7 +244,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "密码未初始化，请先设置密码")
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)); err != nil {
+	if !matchesAdminPassword(hash, req.OldPassword) {
 		writeErr(w, 401, "当前密码错误")
 		return
 	}
@@ -298,7 +298,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "密码未初始化，请先设置密码")
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
+	if !matchesAdminPassword(hash, req.Password) {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}
@@ -308,4 +308,8 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"token": tok})
+}
+
+func matchesAdminPassword(hash, password string) bool {
+	return len(password) <= maxPasswordBytes && bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

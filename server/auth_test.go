@@ -12,7 +12,19 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"golang.org/x/crypto/bcrypt"
 )
+
+func TestAdminPasswordComparisonByteLimit(t *testing.T) {
+	password := strings.Repeat("界", 24)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matchesAdminPassword(string(hash), password) || matchesAdminPassword(string(hash), password+"x") {
+		t.Fatal("password comparison must use exactly the submitted credential")
+	}
+}
 
 func signTestSession(s *Server) (string, error) {
 	generation, _, err := s.m.pg.GetSetting("auth.session_generation")
