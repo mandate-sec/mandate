@@ -88,7 +88,7 @@ func TestLegacyCaptureFilePolicy(t *testing.T) {
 }
 
 func TestTrafficArchiveRoundTripAndCurrentRowWins(t *testing.T) {
-	trafficDir := t.TempDir()
+	trafficDir := privateCaptureFixture(t)
 	tr, err := Open(trafficDir, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ VALUES(?,?,?,?,?)`, id, requestHead, []byte("payload"), responseHead, []byte(`{"
 }
 
 func TestRecoverArchiveHostDeleteStageRollsBackBeforePostgresCommit(t *testing.T) {
-	trafficDir := t.TempDir()
+	trafficDir := privateCaptureFixture(t)
 	tr, err := Open(trafficDir, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestRecoverArchiveHostDeleteStageRollsBackBeforePostgresCommit(t *testing.T
 }
 
 func TestRecoverArchiveHostDeleteStageCompletesAfterPostgresCommit(t *testing.T) {
-	trafficDir := t.TempDir()
+	trafficDir := privateCaptureFixture(t)
 	tr, err := Open(trafficDir, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

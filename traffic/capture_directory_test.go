@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func privateCaptureFixture(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "traffic")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestPrivateCaptureDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "traffic")
 	if err := prepareCaptureDirectory(dir); err != nil {

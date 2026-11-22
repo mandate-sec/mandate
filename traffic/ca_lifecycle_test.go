@@ -9,7 +9,7 @@ import (
 )
 
 func TestCaptureCAStorage(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateCaptureFixture(t)
 	tr, err := Open(dir, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

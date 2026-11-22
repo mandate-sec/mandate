@@ -49,7 +49,7 @@ func newFlow(host, method, path string, reqBody, respBody []byte, opts ...flowOp
 
 func openTraffic(t *testing.T) (*Traffic, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := privateCaptureFixture(t)
 	tr, err := Open(dir, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
