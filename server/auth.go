@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -66,7 +67,8 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			return
 		}
 		tok := extractToken(r)
-		if tok == "" {
+		// Issued sessions are compact, three-part JWTs. Reject obvious junk before a database lookup.
+		if len(tok) > 4096 || strings.Count(tok, ".") != 2 {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeErr(w, 401, "未授权")
 			return

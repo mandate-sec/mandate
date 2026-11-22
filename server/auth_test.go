@@ -17,6 +17,21 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+func TestAuthRejectsMalformedCredentialsBeforeStoreAccess(t *testing.T) {
+	handler := (&Server{}).requireAuth(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("protected handler ran")
+	}))
+	for _, value := range []string{"", "plain-text", "a.b.c.d", "a.b." + strings.Repeat("x", 4096)} {
+		request := httptest.NewRequest(http.MethodGet, "/api/session-check", nil)
+		request.Header.Set("Authorization", "Bearer "+value)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("expected rejection before database access, got %d", response.Code)
+		}
+	}
+}
+
 func TestAuthRejectsWhenSessionLookupStalls(t *testing.T) {
 	store, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -32,7 +47,11 @@ func TestAuthRejectsWhenSessionLookupStalls(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*sessionCheckTimeout)
 	defer cancel()
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/session-check", nil)
-	req.Header.Set("Authorization", "Bearer fixture")
+	token, err := signJWT([]byte("test-only signing key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	s := &Server{m: &Manager{pg: &db.DB{DB: store}}}
 	w := httptest.NewRecorder()
 	s.requireAuth(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
