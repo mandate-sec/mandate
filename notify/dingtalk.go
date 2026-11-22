@@ -86,16 +86,15 @@ func (c dingTalkChannel) Send(ctx context.Context, cfg map[string]any, m Message
 	}
 	// 钉钉把业务错误藏在 200 响应里。
 	var res struct {
-		ErrCode int    `json:"errcode"`
-		ErrMsg  string `json:"errmsg"`
+		ErrCode int `json:"errcode"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, fmt.Errorf("解析钉钉响应失败: %w (%s)", err, snippet(raw))
+		return 0, errors.New("解析钉钉响应失败")
 	}
 	if res.ErrCode != 0 {
 		// 301000 是签名校验失败、310000 是关键词不匹配——都是配置错误，
 		// 重试不会自愈。
-		return 0, Permanent(fmt.Errorf("钉钉返回错误 %d: %s", res.ErrCode, res.ErrMsg))
+		return 0, Permanent(fmt.Errorf("钉钉返回错误 %d", res.ErrCode))
 	}
 	return kept, nil
 }

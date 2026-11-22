@@ -62,20 +62,19 @@ func (c feishuChannel) Send(ctx context.Context, cfg map[string]any, m Message) 
 		return 0, err
 	}
 	var res struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
+		Code int `json:"code"`
+
 		// 部分版本的飞书 hook 用这套字段名，一并兼容。
-		StatusCode    int    `json:"StatusCode"`
-		StatusMessage string `json:"StatusMessage"`
+		StatusCode int `json:"StatusCode"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, fmt.Errorf("解析飞书响应失败: %w (%s)", err, snippet(raw))
+		return 0, errors.New("解析飞书响应失败")
 	}
 	if res.Code != 0 {
-		return 0, Permanent(fmt.Errorf("飞书返回错误 %d: %s", res.Code, res.Msg))
+		return 0, Permanent(fmt.Errorf("飞书返回错误 %d", res.Code))
 	}
 	if res.StatusCode != 0 {
-		return 0, Permanent(fmt.Errorf("飞书返回错误 %d: %s", res.StatusCode, res.StatusMessage))
+		return 0, Permanent(fmt.Errorf("飞书返回错误 %d", res.StatusCode))
 	}
 	return kept, nil
 }

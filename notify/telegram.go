@@ -67,12 +67,11 @@ func (c telegramChannel) Send(ctx context.Context, cfg map[string]any, m Message
 		return 0, err
 	}
 	var res struct {
-		OK          bool   `json:"ok"`
-		ErrorCode   int    `json:"error_code"`
-		Description string `json:"description"`
+		OK        bool `json:"ok"`
+		ErrorCode int  `json:"error_code"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, fmt.Errorf("解析 Telegram 响应失败: %w (%s)", err, snippet(raw))
+		return 0, errors.New("解析 Telegram 响应失败")
 	}
 	if res.OK {
 		return kept, nil
@@ -80,9 +79,9 @@ func (c telegramChannel) Send(ctx context.Context, cfg map[string]any, m Message
 	// 429 是限流，退避后重试有效；其余（400 参数错、401 token 错、403 被拉黑、
 	// 404 chat 不存在）都是配置问题，重试不会自愈。
 	if res.ErrorCode == 429 {
-		return 0, fmt.Errorf("Telegram 限流: %s", res.Description)
+		return 0, fmt.Errorf("Telegram 限流 %d", res.ErrorCode)
 	}
-	return 0, Permanent(fmt.Errorf("Telegram 返回错误 %d: %s", res.ErrorCode, res.Description))
+	return 0, Permanent(fmt.Errorf("Telegram 返回错误 %d", res.ErrorCode))
 }
 
 // telegramEndpoint 拼出 sendMessage 地址。base_url 留空时用官方 API，

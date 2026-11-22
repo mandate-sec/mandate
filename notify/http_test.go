@@ -81,6 +81,9 @@ func TestDoJSONClassifiesHTTPStatus(t *testing.T) {
 			if err == nil {
 				t.Fatal("非 2xx 应报错")
 			}
+			if strings.Contains(err.Error(), "upstream says no") {
+				t.Fatal("delivery error included private response text")
+			}
 			if got := IsPermanent(err); got != tc.permanent {
 				t.Fatalf("HTTP %d 的 permanent 判定错误：期望 %v 得到 %v (%v)",
 					tc.status, tc.permanent, got, err)
@@ -95,36 +98,24 @@ func TestDoJSONClassifiesHTTPStatus(t *testing.T) {
 	}
 }
 
-// TestDoJSONIncludesResponseSnippet 覆盖 snippet：对端返回的错误说明要带回来，
-// 否则用户只知道「失败了」，不知道对端为什么拒绝。
-func TestDoJSONIncludesResponseSnippet(t *testing.T) {
-	srv := replyServer(t, 400, `{"error":"invalid webhook token"}`)
-	_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
-	if err == nil {
-		t.Fatal("应报错")
-	}
-	if !strings.Contains(err.Error(), "invalid webhook token") {
-		t.Errorf("错误信息应带回对端的说明，得到 %v", err)
-	}
-}
-
-// TestDoJSONSnippetIsSingleLineAndBounded 约束 snippet 的形态：
-// 它对端响应会原样进 last_error 列与前端表格，多行/超长会破坏排版与载荷。
-func TestDoJSONSnippetIsSingleLineAndBounded(t *testing.T) {
-	// 带换行、制表符与 5000 字符超长内容的响应。
-	long := strings.Repeat("x", 5000)
-	srv := replyServer(t, 500, "line1\nline2\r\n\tline3 "+long)
-	_, err := doJSON(context.Background(), "GET", srv.URL, nil, nil)
-	if err == nil {
-		t.Fatal("应报错")
-	}
-	msg := err.Error()
-	if strings.ContainsAny(msg, "\r\n\t") {
-		t.Errorf("错误信息应压成单行，得到 %q", msg)
-	}
-	// snippet 上限 200 字符 + 固定前缀，总量必须远小于原始响应。
-	if len(msg) > 400 {
-		t.Errorf("错误信息过长（%d 字节），应被 snippet 截断: %q", len(msg), msg)
+func TestProviderErrorsOmitResponseText(t *testing.T) {
+	const marker = "private-response-marker"
+	for _, tc := range []struct{ kind, response string }{
+		{KindDingTalk, `{"errcode":310000,"errmsg":"private-response-marker"}`},
+		{KindWeCom, `{"errcode":45009,"errmsg":"private-response-marker"}`},
+		{KindFeishu, `{"StatusCode":7,"StatusMessage":"private-response-marker"}`},
+		{KindTelegram, `{"ok":false,"error_code":429,"description":"private-response-marker"}`},
+		{KindDingTalk, marker},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			srv := replyServer(t, http.StatusOK, tc.response)
+			channel, _ := Get(tc.kind)
+			cfg := map[string]any{"webhook": srv.URL, "bot_token": "tok", "chat_id": "1", "base_url": srv.URL}
+			_, err := channel.Send(context.Background(), cfg, singleMsg())
+			if err == nil || strings.Contains(err.Error(), marker) {
+				t.Fatalf("expected a redacted delivery error, got %v", err)
+			}
+		})
 	}
 }
 

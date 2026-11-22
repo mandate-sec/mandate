@@ -58,21 +58,20 @@ func (c weComChannel) Send(ctx context.Context, cfg map[string]any, m Message) (
 		return 0, err
 	}
 	var res struct {
-		ErrCode int    `json:"errcode"`
-		ErrMsg  string `json:"errmsg"`
+		ErrCode int `json:"errcode"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, fmt.Errorf("解析企业微信响应失败: %w (%s)", err, snippet(raw))
+		return 0, errors.New("解析企业微信响应失败")
 	}
 	if res.ErrCode != 0 {
 		// 45009 是接口调用超过限制——平台的限流窗口会滚动，退避后重试是有效的，
 		// 所以显式归为可重试。走到这里说明客户端 rate_per_min 配得过于激进，
 		// 重试只是兜底，真正的修法是调低该渠道的限流值。
 		if res.ErrCode == 45009 {
-			return 0, fmt.Errorf("企业微信限流 %d: %s", res.ErrCode, res.ErrMsg)
+			return 0, fmt.Errorf("企业微信限流 %d", res.ErrCode)
 		}
 		// 93000 是 webhook key 无效——永久失败，重试不会自愈。
-		return 0, Permanent(fmt.Errorf("企业微信返回错误 %d: %s", res.ErrCode, res.ErrMsg))
+		return 0, Permanent(fmt.Errorf("企业微信返回错误 %d", res.ErrCode))
 	}
 	return kept, nil
 }

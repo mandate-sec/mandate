@@ -21,9 +21,7 @@ import (
 // 默认拒绝。这几段地址不是 IM 机器人或公网邮件服务器会出现的地方，而它们能
 // 打到的东西很敏感：同机另一个服务的管理端口、以及云环境的元数据端点
 // （169.254.169.254，可读出实例凭据）。投递地址是管理员配的，但一个被 XSS/CSRF
-// 借用的管理会话、或共用同一 JWT 的第二个人，都能靠改配置把响应内容读回来
-// ——doJSON 会把 4xx/5xx 的响应体前 200 字节写进 last_error，而投递历史接口
-// 会把它回显出来，这就是一条半盲读原语。
+// 借用的管理会话可能更改投递地址并访问本机服务。
 //
 // 但「本机 SMTP 中继」（127.0.0.1:25 上的 postfix）是自建邮件的常见配置，
 // 一刀切会把人卡住。所以留一个显式逃生口而不是硬编码放行：
@@ -170,25 +168,19 @@ func doJSON(ctx context.Context, method, url string, headers map[string]string, 
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, respBodyLimit))
 	if readErr != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", readErr)
+		return nil, errors.New("读取响应失败")
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return raw, nil
 	}
 	// 429（限流）与 408（超时）值得重试；其余 4xx 是配置或权限问题，重试无意义。
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
-		return nil, fmt.Errorf("对方限流或超时 (HTTP %d): %s", resp.StatusCode, snippet(raw))
+		return nil, fmt.Errorf("对方限流或超时 (HTTP %d)", resp.StatusCode)
 	}
 	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("对方服务异常 (HTTP %d): %s", resp.StatusCode, snippet(raw))
+		return nil, fmt.Errorf("对方服务异常 (HTTP %d)", resp.StatusCode)
 	}
-	return nil, Permanent(fmt.Errorf("对方拒绝请求 (HTTP %d): %s", resp.StatusCode, snippet(raw)))
-}
-
-// snippet 把响应体压成一行短文本，用于错误信息。响应里可能带换行与大量空白，
-// 直接塞进 last_error 会让投递历史页面排版崩掉。
-func snippet(raw []byte) string {
-	return OneLine(string(raw), 200)
+	return nil, Permanent(fmt.Errorf("对方拒绝请求 (HTTP %d)", resp.StatusCode))
 }
 
 // redactRequestTarget 把投递地址压成「scheme://host/…」，用于错误信息。
