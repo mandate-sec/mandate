@@ -182,7 +182,7 @@ func (d *DB) SetNotificationChannelEnabled(ctx context.Context, id int64, enable
 			return ErrNotificationChannelNotFound
 		}
 		if !enabled {
-			if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries SET state=$2, last_error=$3
+			if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries SET state=$2, last_error='', delivery_diagnostic=$3
 WHERE channel_id=$1 AND state IN ($4,$5)`,
 				id, NotifyStateSkipped, "渠道已停用", NotifyStatePending, NotifyStateSending); err != nil {
 				return err

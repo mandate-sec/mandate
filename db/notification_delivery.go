@@ -59,7 +59,7 @@ type NotificationDelivery struct {
 }
 
 const notificationDeliveryCols = `d.id, d.event_id, d.channel_id, d.state, d.attempts, d.next_attempt_at,
-       d.last_error, d.batch_id, d.created_at, d.sent_at`
+       CASE WHEN d.last_error <> '' THEN 'Historical delivery details withheld' ELSE d.delivery_diagnostic END, d.batch_id, d.created_at, d.sent_at`
 
 // joinedDeliveryQuery 是投递行的统一读取形状：投递 + 事件快照 + 渠道配置。
 // 渲染一条消息三者缺一不可，分开查会写出三次往返。
@@ -285,7 +285,7 @@ func (d *DB) MarkDeliveriesSent(ctx context.Context, ids []int64) error {
 		return nil
 	}
 	_, err := d.ExecContext(ctx, `UPDATE notification_deliveries
-SET state=$1, sent_at=now(), last_error='' WHERE id IN (`+ph+`)`, append([]any{NotifyStateSent}, args...)...)
+SET state=$1, sent_at=now(), last_error='', delivery_diagnostic='' WHERE id IN (`+ph+`)`, append([]any{NotifyStateSent}, args...)...)
 	return err
 }
 
@@ -299,7 +299,7 @@ func (d *DB) RescheduleDeliveries(ctx context.Context, ids []int64, delay time.D
 		return nil
 	}
 	_, err := d.ExecContext(ctx, `UPDATE notification_deliveries
-SET state=$1, next_attempt_at=now()+make_interval(secs => $2), last_error=$3
+SET state=$1, next_attempt_at=now()+make_interval(secs => $2), last_error='', delivery_diagnostic=$3
 WHERE id IN (`+ph+`)`,
 		append([]any{NotifyStatePending, delay.Seconds(), truncateNotifyError(errMsg)}, args...)...)
 	return err
@@ -320,7 +320,7 @@ func (d *DB) DeferDeliveries(ctx context.Context, ids []int64, reason string) er
 		return nil
 	}
 	_, err := d.ExecContext(ctx, `UPDATE notification_deliveries
-SET state=$1, attempts=GREATEST(attempts-1, 0), next_attempt_at=now(), last_error=$2
+SET state=$1, attempts=GREATEST(attempts-1, 0), next_attempt_at=now(), last_error='', delivery_diagnostic=$2
 WHERE id IN (`+ph+`)`,
 		append([]any{NotifyStatePending, truncateNotifyError(reason)}, args...)...)
 	return err
@@ -333,7 +333,7 @@ func (d *DB) FailDeliveries(ctx context.Context, ids []int64, errMsg string) err
 	if len(args) == 0 {
 		return nil
 	}
-	_, err := d.ExecContext(ctx, `UPDATE notification_deliveries SET state=$1, last_error=$2 WHERE id IN (`+ph+`)`,
+	_, err := d.ExecContext(ctx, `UPDATE notification_deliveries SET state=$1, last_error='', delivery_diagnostic=$2 WHERE id IN (`+ph+`)`,
 		append([]any{NotifyStateFailed, truncateNotifyError(errMsg)}, args...)...)
 	return err
 }
@@ -343,7 +343,7 @@ func (d *DB) FailDeliveries(ctx context.Context, ids []int64, errMsg string) err
 // 再拿旧计数限制它没有道理。
 func (d *DB) RetryNotificationDelivery(ctx context.Context, id int64) error {
 	res, err := d.ExecContext(ctx, `UPDATE notification_deliveries
-SET state=$2, attempts=0, next_attempt_at=now(), last_error=''
+SET state=$2, attempts=0, next_attempt_at=now(), last_error='', delivery_diagnostic=''
 WHERE id=$1 AND state IN ($3,$4)`, id, NotifyStatePending, NotifyStateFailed, NotifyStateSkipped)
 	if err != nil {
 		return err

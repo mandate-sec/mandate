@@ -426,11 +426,21 @@ func TestDeliveryStateTransitions(t *testing.T) {
 	}
 	id := got[0].ID
 
+	if _, err := d.Exec(`UPDATE notification_deliveries SET last_error='private legacy response' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	history, _, err := d.ListNotificationDeliveries(ctx, NotificationDeliveryFilter{ChannelID: ch.ID}, 1, 10)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("read legacy delivery: count=%d err=%v", len(history), err)
+	}
+	if history[0].LastError != "Historical delivery details withheld" {
+		t.Fatal("legacy delivery details were not withheld")
+	}
 	if err := d.RescheduleDeliveries(ctx, []int64{id}, time.Second, "网络抖动"); err != nil {
 		t.Fatal(err)
 	}
 	var state, lastErr string
-	if err := d.QueryRow(`SELECT state, last_error FROM notification_deliveries WHERE id=$1`, id).Scan(&state, &lastErr); err != nil {
+	if err := d.QueryRow(`SELECT state, delivery_diagnostic FROM notification_deliveries WHERE id=$1`, id).Scan(&state, &lastErr); err != nil {
 		t.Fatal(err)
 	}
 	if state != NotifyStatePending || lastErr != "网络抖动" {

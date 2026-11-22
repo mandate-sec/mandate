@@ -1376,6 +1376,9 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     sent_at     TIMESTAMPTZ
 );
+-- Older writers may store private provider responses in last_error.
+-- Keep those values out of history even during a rolling upgrade.
+ALTER TABLE notification_deliveries ADD COLUMN IF NOT EXISTS delivery_diagnostic TEXT;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_due
     ON notification_deliveries(next_attempt_at) WHERE state='pending';
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_history
