@@ -45,8 +45,10 @@ type staticAsset struct {
 
 	gzipOnce sync.Once
 	gzipBody []byte
+	gzipETag string
 	brOnce   sync.Once
 	brBody   []byte
+	brETag   string
 }
 
 func newStaticFileServer(fsys fs.FS) *staticFileServer {
@@ -61,7 +63,7 @@ func (s *staticFileServer) serveFileIfExists(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return false
 	}
-	s.serve(w, r, a)
+	s.serve(w, r, name, a)
 	return true
 }
 
@@ -73,31 +75,27 @@ func (s *staticFileServer) load(name string) (*staticAsset, bool) {
 	if err != nil || data == nil {
 		return nil, false
 	}
-	sum := sha256.Sum256(data)
 	a := &staticAsset{
 		raw:         data,
-		etag:        `"` + hex.EncodeToString(sum[:16]) + `"`,
+		etag:        staticETag(data),
 		contentType: staticContentType(name),
 	}
 	actual, _ := s.cache.LoadOrStore(name, a)
 	return actual.(*staticAsset), true
 }
 
-func (s *staticFileServer) serve(w http.ResponseWriter, r *http.Request, a *staticAsset) {
+func staticETag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
+func (s *staticFileServer) serve(w http.ResponseWriter, r *http.Request, name string, a *staticAsset) {
 	h := w.Header()
 	h.Set("Content-Type", a.contentType)
 	h.Set("ETag", a.etag)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Vary", "Accept-Encoding")
-	h.Set("Cache-Control", staticCacheControl(r.URL.Path))
-
-	// Unconditional revalidation: a matching ETag means the browser already has
-	// the exact bytes, including for the content-hashed immutable assets (which
-	// normally never reach this branch).
-	if etagMatches(r.Header.Get("If-None-Match"), a.etag) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
+	h.Set("Cache-Control", staticCacheControl("/"+name))
 
 	// Range requests must not be compressed and need the standard partial-content
 	// handling. ServeContent also applies our ETag/Content-Type headers.
@@ -109,13 +107,19 @@ func (s *staticFileServer) serve(w http.ResponseWriter, r *http.Request, a *stat
 	body := a.raw
 	if enc := negotiateEncoding(r, a); enc != "" {
 		if enc == "br" {
-			a.brOnce.Do(func() { a.brBody = brotliCompress(a.raw) })
+			a.brOnce.Do(func() { a.brBody = brotliCompress(a.raw); a.brETag = staticETag(a.brBody) })
 			body = a.brBody
+			h.Set("ETag", a.brETag)
 		} else {
-			a.gzipOnce.Do(func() { a.gzipBody = gzipCompress(a.raw) })
+			a.gzipOnce.Do(func() { a.gzipBody = gzipCompress(a.raw); a.gzipETag = staticETag(a.gzipBody) })
 			body = a.gzipBody
+			h.Set("ETag", a.gzipETag)
 		}
 		h.Set("Content-Encoding", enc)
+	}
+	if etagMatches(r.Header.Get("If-None-Match"), h.Get("ETag")) {
+		w.WriteHeader(http.StatusNotModified)
+		return
 	}
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	if r.Method == http.MethodHead {
@@ -140,7 +144,7 @@ func staticCacheControl(urlPath string) string {
 // negotiateEncoding returns "br" or "gzip" when the request accepts one and the
 // asset is worth compressing, otherwise "".
 func negotiateEncoding(r *http.Request, a *staticAsset) string {
-	if r.Method == http.MethodHead || len(a.raw) < 1024 || !isCompressible(a.contentType) {
+	if len(a.raw) < 1024 || !isCompressible(a.contentType) {
 		return ""
 	}
 	ae := r.Header.Get("Accept-Encoding")

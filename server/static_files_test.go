@@ -146,6 +146,34 @@ func TestStaticRangeBypassesCompression(t *testing.T) {
 	}
 }
 
+func TestStaticValidatorsMatchSelectedBytes(t *testing.T) {
+	fss := newStaticFileServer(testStaticFS())
+	const asset = "_next/static/chunks/app.js"
+	plain := serveTest(t, fss, asset, http.MethodGet, nil)
+	for _, encoding := range []string{"gzip", "br"} {
+		headers := map[string]string{"Accept-Encoding": encoding, "If-None-Match": plain.Header().Get("ETag")}
+		get := serveTest(t, fss, asset, http.MethodGet, headers)
+		if get.Code != http.StatusOK || get.Header().Get("ETag") != staticETag(get.Body.Bytes()) {
+			t.Fatalf("%s returned a validator for different bytes", encoding)
+		}
+		head := serveTest(t, fss, asset, http.MethodHead, headers)
+		for _, key := range []string{"Content-Encoding", "ETag", "Content-Length"} {
+			if head.Header().Get(key) != get.Header().Get(key) {
+				t.Fatalf("%s HEAD and GET differ on %s", encoding, key)
+			}
+		}
+		headers["If-None-Match"] = get.Header().Get("ETag")
+		if w := serveTest(t, fss, asset, http.MethodGet, headers); w.Code != http.StatusNotModified {
+			t.Fatalf("%s matching validator returned %d", encoding, w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/_next/static/missing", nil)
+	if !fss.serveFileIfExists(w, r, "index.html") || w.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatal("fallback HTML inherited immutable caching from the URL")
+	}
+}
+
 func TestStaticHeadHasNoBody(t *testing.T) {
 	fss := newStaticFileServer(testStaticFS())
 	w := serveTest(t, fss, "_next/static/chunks/app.js", http.MethodHead, map[string]string{"Accept-Encoding": "br"})
