@@ -117,6 +117,9 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const r = await fetch(`/api${path}`, {
     ...init,
+    // API bodies can contain passwords and setup tokens. Keep redirected
+    // requests on the console origin as well as the initial request.
+    mode: "same-origin",
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
