@@ -18,6 +18,8 @@ Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before star
 
 Signing out clears this browser's token. A copied token remains usable until its seven-day expiry or an administrator password change. Change the password to revoke all sessions if a token is exposed.
 
+If you used an older offline reset script to respond to a stolen session, upgrade and change the administrator password again. Installing the fix alone leaves the existing session generation in place. If the script printed a database connection string into a shared terminal log, rotate any database password it contained.
+
 Each console process permits ten sign-in or password-change attempts per minute per connecting IP address, including successful attempts. It processes at most two of these password checks at once. A throttled request receives HTTP 429 and a `Retry-After` header. Users behind one reverse proxy share its budget. For a deployment with multiple replicas, apply a shared sign-in limit at the ingress as well.
 
 Changing the administrator password invalidates earlier tokens for subsequent API requests, including reconnects. Open console event streams expire with the token and recheck the shared session generation every 15 seconds. A failed check closes the stream, with a three-second timeout for the database lookup. Data already delivered or buffered before cancellation cannot be recalled.

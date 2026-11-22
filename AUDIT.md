@@ -26,7 +26,7 @@ The fix prevents forwarding credentials to a second origin. Configuring that des
 | 2 | Password guesses and simultaneous expensive password checks lacked limits | [32042e6](https://github.com/mandate-sec/mandate/commit/32042e6964f14b5ebbed4c5e46cedbbd24a449ec) |
 | 3 | Stream URLs could contain reusable session tokens | [4e9cf11](https://github.com/mandate-sec/mandate/commit/4e9cf110a02b7feea45901e699a1f3abd4368632) |
 | 4 | Console sessions relied on legacy workspace-derived signing keys | [1b1b4eb](https://github.com/mandate-sec/mandate/commit/1b1b4ebdb796f749387385f9c5f6799f6b48864f) |
-| 5 | Password changes left earlier sessions usable | [bd74b63](https://github.com/mandate-sec/mandate/commit/bd74b63b4e8f7334902dd3e7fecb29444cb8d1c1) |
+| 5 | Console password changes and offline administrator resets left earlier sessions usable | [bd74b63](https://github.com/mandate-sec/mandate/commit/bd74b63b4e8f7334902dd3e7fecb29444cb8d1c1), [offline reset fix](https://github.com/mandate-sec/mandate/commit/afec6cb) |
 | 6 | Open event streams could outlive session expiry or revocation | [728c530](https://github.com/mandate-sec/mandate/commit/728c53031f6db6486a12c4c2561e1a6f38ecc3d4) |
 | 7 | Traffic capture retained sensitive HTTP headers | [ba7eff9](https://github.com/mandate-sec/mandate/commit/ba7eff98b34d42b41719e32ab7ebfe214404313b) |
 | 8 | Captured URLs retained credentials | [db6f7f2](https://github.com/mandate-sec/mandate/commit/db6f7f2f92a1b82c5d3dbfd2151db044eb59cb18) |
@@ -55,3 +55,5 @@ The fix prevents forwarding credentials to a second origin. Configuring that des
 | 31 | Viewing Markdown findings, reports or transcripts could automatically contact an image host selected by the content author | [bfd6d01](https://github.com/mandate-sec/mandate/commit/bfd6d0198f3abd65ac0432352d4f3136e93e0712) |
 | 32 | Findings CSV exports allowed untrusted text to be interpreted as spreadsheet formulas | [f9cd005](https://github.com/mandate-sec/mandate/commit/f9cd005598508ddb51ad080d6060af1c098352ca) |
 | 33 | With a traversable workspace and a typical Unix umask, other local accounts could read stored capture bodies. New capture directories are private. On upgrade, restrict the dedicated traffic directory to mode 0700 before restarting capture. Windows access depends on directory ACLs. | [7f31561](https://github.com/mandate-sec/mandate/commit/7f31561bd60ccec0093f2974231ddfe145b28021) |
+| 34 | Docker password recovery sourced a checkout’s `.env` as shell code on the operator’s host. A modified file could run with the operator’s privileges. | [b102218](https://github.com/mandate-sec/mandate/commit/b102218) |
+| 35 | Local password recovery printed the full connection string, including any embedded database password, in its target confirmation. | [afec6cb](https://github.com/mandate-sec/mandate/commit/afec6cb) |
