@@ -66,6 +66,27 @@ func TestRestoreRequiresVerifiedBlobReferences(t *testing.T) {
 	}
 }
 
+func TestLegacyCaptureFilePolicy(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.Mkdir("capture", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.WriteFile(filepath.Join("capture", "request.http"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readLegacyFile(root, "capture", "request.http")
+	if err != nil || string(data) != "fixture" {
+		t.Fatalf("read valid capture: %v", err)
+	}
+	if _, err := readLegacyFile(root, "..", "request.http"); err == nil {
+		t.Fatal("accepted a nonlocal directory")
+	}
+}
+
 func TestTrafficArchiveRoundTripAndCurrentRowWins(t *testing.T) {
 	trafficDir := t.TempDir()
 	tr, err := Open(trafficDir, "127.0.0.1:0")

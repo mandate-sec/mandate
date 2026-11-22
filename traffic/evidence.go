@@ -58,12 +58,17 @@ func (t *Traffic) readEvidence(id string, consume func(EvidenceExchange) error) 
 		if !filepath.IsLocal(legacy) {
 			return errors.New("旧流量路径无效")
 		}
-		r, err := os.Open(filepath.Join(t.dir, legacy, "request.http"))
+		root, err := os.OpenRoot(t.dir)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		r, err := root.Open(filepath.Join(legacy, "request.http"))
 		if err != nil {
 			return err
 		}
 		defer r.Close()
-		p, err := os.Open(filepath.Join(t.dir, legacy, "response.http"))
+		p, err := root.Open(filepath.Join(legacy, "response.http"))
 		if err != nil {
 			return err
 		}

@@ -55,6 +55,11 @@ func (t *Traffic) ExportHosts(hosts []string, dir string) (int64, error) {
 	}
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
+	root, err := os.OpenRoot(t.dir)
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
 	unique := uniqueArchiveHosts(hosts)
 	placeholders := make([]string, len(unique))
 	args := make([]any, len(unique))
@@ -81,11 +86,11 @@ FROM exchanges WHERE host IN (`+strings.Join(placeholders, ",")+`) ORDER BY ts,i
 		err := t.db.QueryRow(`SELECT req_head,req_body,req_blob,resp_head,resp_body,resp_blob
 FROM exchange_bodies WHERE id=?`, item.ID).Scan(&item.ReqHead, &item.ReqBody, &reqBlob, &item.RespHead, &item.RespBody, &respBlob)
 		if errors.Is(err, sql.ErrNoRows) && strings.TrimSpace(legacyPath) != "" {
-			req, readErr := os.ReadFile(filepath.Join(t.dir, legacyPath, "request.http"))
+			req, readErr := readLegacyFile(root, legacyPath, "request.http")
 			if readErr != nil && !os.IsNotExist(readErr) {
 				return 0, readErr
 			}
-			resp, readErr := os.ReadFile(filepath.Join(t.dir, legacyPath, "response.http"))
+			resp, readErr := readLegacyFile(root, legacyPath, "response.http")
 			if readErr != nil && !os.IsNotExist(readErr) {
 				return 0, readErr
 			}
@@ -105,11 +110,12 @@ FROM exchange_bodies WHERE id=?`, item.ID).Scan(&item.ReqHead, &item.ReqBody, &r
 		return 0, err
 	}
 	for hash := range blobs {
-		source, err := t.blobPath(hash)
+		source, _, err := t.Blob(hash)
 		if err != nil {
 			return 0, err
 		}
-		data, err := os.ReadFile(source)
+		data, err := io.ReadAll(source)
+		source.Close()
 		if err != nil {
 			return 0, err
 		}

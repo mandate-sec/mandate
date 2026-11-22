@@ -649,45 +649,49 @@ func sanitize(s string) string {
 
 var blobHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// blobPath locates a stored blob. Current writes use one bucket level; blobs
-// written before that change used two, so both layouts are probed rather than
-// migrated.
-func (t *Traffic) blobPath(hash string) (string, error) {
+// Blob opens a regular file under the capture root, including the older two-bucket layout.
+func (t *Traffic) Blob(hash string) (*os.File, int64, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
-	// Validated as pure hex before touching the filesystem, so a crafted hash can
-	// never traverse out of the blob directory.
 	if !blobHashRe.MatchString(hash) {
-		return "", fmt.Errorf("非法的 blob hash")
+		return nil, 0, errors.New("invalid blob hash")
 	}
-	for _, p := range []string{
-		filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash+".bin"),
-		filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash[2:4], hash+".bin"),
-	} {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p, nil
+	root, err := os.OpenRoot(t.dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer root.Close()
+	bucket := filepath.Join("_blobs", "sha256", hash[:2])
+	for _, dir := range []string{bucket, filepath.Join(bucket, hash[2:4])} {
+		f, err := root.Open(filepath.Join(dir, hash+".bin"))
+		if os.IsNotExist(err) {
+			continue
 		}
+		if err != nil {
+			return nil, 0, err
+		}
+		st, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, 0, err
+		}
+		if !st.Mode().IsRegular() {
+			f.Close()
+			return nil, 0, errors.New("invalid blob file type")
+		}
+		return f, st.Size(), nil
 	}
-	return "", fmt.Errorf("blob %s 不存在", hash)
+	return nil, 0, os.ErrNotExist
 }
 
-// Blob opens a spilled body for streaming; the caller must close the file.
-// Streaming matters here: the driver exposes no incremental BLOB API, so keeping
-// large bodies on disk is what lets them be served without loading them whole.
-func (t *Traffic) Blob(hash string) (*os.File, int64, error) {
-	p, err := t.blobPath(hash)
-	if err != nil {
-		return nil, 0, err
+func readLegacyFile(root *os.Root, dir, name string) ([]byte, error) {
+	if !filepath.IsLocal(dir) {
+		return nil, errors.New("invalid legacy capture directory")
 	}
-	f, err := os.Open(p)
-	if err != nil {
-		return nil, 0, err
+	data, err := root.ReadFile(filepath.Join(dir, name))
+	if os.IsNotExist(err) {
+		return nil, nil
 	}
-	st, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, 0, err
-	}
-	return f, st.Size(), nil
+	return data, err
 }
 
 // BlobRange reads at most length bytes of a blob from offset, and reports the
@@ -705,7 +709,7 @@ func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, tot
 	if offset >= size {
 		return nil, size, nil
 	}
-	if length <= 0 || offset+length > size {
+	if length <= 0 || length > size-offset {
 		length = size - offset
 	}
 	buf := make([]byte, length)
@@ -937,8 +941,19 @@ FROM exchange_bodies b JOIN exchanges e ON e.id=b.id WHERE b.id=?`, id).
 	if strings.TrimSpace(rel) == "" {
 		return "", "", fmt.Errorf("exchange %s 无正文记录", id)
 	}
-	rb, _ := os.ReadFile(filepath.Join(t.dir, rel, "request.http"))
-	pb, _ := os.ReadFile(filepath.Join(t.dir, rel, "response.http"))
+	root, err := os.OpenRoot(t.dir)
+	if err != nil {
+		return "", "", err
+	}
+	defer root.Close()
+	rb, err := readLegacyFile(root, rel, "request.http")
+	if err != nil {
+		return "", "", err
+	}
+	pb, err := readLegacyFile(root, rel, "response.http")
+	if err != nil {
+		return "", "", err
+	}
 	return string(rb), string(pb), nil
 }
 
@@ -1834,13 +1849,18 @@ func (t *Traffic) legacyBlobRefs(refs map[string]struct{}) error {
 		return nil
 	}
 	blobRe := regexp.MustCompile(`@blob sha256:([0-9a-f]{64})`)
-	return filepath.WalkDir(t.dir, func(p string, d fs.DirEntry, err error) error {
+	root, err := os.OpenRoot(t.dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil {
 			return nil // skip unreadable entries
 		}
 		if d.IsDir() {
 			// _blobs/_index/_ca never contain references; skip their subtrees.
-			if p != t.dir && strings.HasPrefix(d.Name(), "_") {
+			if p != "." && strings.HasPrefix(d.Name(), "_") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1848,7 +1868,7 @@ func (t *Traffic) legacyBlobRefs(refs map[string]struct{}) error {
 		if nm := d.Name(); nm != "request.http" && nm != "response.http" {
 			return nil
 		}
-		b, err := os.ReadFile(p)
+		b, err := root.ReadFile(filepath.FromSlash(p))
 		if err != nil {
 			return nil
 		}
