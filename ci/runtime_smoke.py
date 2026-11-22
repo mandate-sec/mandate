@@ -1,10 +1,12 @@
 """Boot the built image and PostgreSQL on an internal network; no target scans."""
 import hashlib
 import json
+import os
 import secrets
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -46,14 +48,53 @@ def expect(result, status):
     return result['body']
 
 
+def start_postgres_compose(directory):
+    # Exercise the real Compose recovery path without touching a checkout's
+    # configuration or any similarly named running service.
+    (directory / '.env.safe').write_text('', encoding='utf-8')
+    config = {
+        'name': name,
+        'services': {
+            'postgres': {
+                'image': PG_IMAGE,
+                'container_name': pg,
+                'environment': {
+                    'POSTGRES_USER': 'artex',
+                    'POSTGRES_PASSWORD': 'smoke-db-fixture',
+                    'POSTGRES_DB': 'artex',
+                },
+                'networks': ['fixture'],
+            },
+        },
+        'networks': {'fixture': {'name': name, 'external': True}},
+    }
+    manifest = directory / 'docker-compose.safe.yml'
+    manifest.write_text(json.dumps(config), encoding='utf-8')
+    docker('compose', '--project-name', name, '-f', str(manifest), 'up', '-d', 'postgres')
+
+
+def revoke_sessions_with_compose(directory):
+    recovery = Path(__file__).resolve().parents[1] / 'reset-password.sh'
+    env = os.environ.copy()
+    for key in ('PGUSER', 'PGPASSWORD', 'PGDATABASE', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB'):
+        env.pop(key, None)
+    env['COMPOSE_PROJECT_NAME'] = name
+    result = subprocess.run(
+        ['bash', str(recovery), '-m', 'docker', '--exec', 'compose', '--revoke-sessions', '--yes'],
+        cwd=directory, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=45,
+    )
+    if result.returncode:
+        raise RuntimeError(f'Compose session revocation failed (exit {result.returncode}): {result.stderr}')
+
+
+compose_fixture = tempfile.TemporaryDirectory(prefix='mandate-smoke-compose-')
+compose_dir = Path(compose_fixture.name)
 try:
     setup_token = secrets.token_hex(32)
     docker('network', 'create', '--internal', name)
     for volume in (data, keys):
         docker('volume', 'create', volume)
-    docker('run', '-d', '--name', pg, '--network', name,
-           '-e', 'POSTGRES_USER=artex', '-e', 'POSTGRES_PASSWORD=smoke-db-fixture',
-           '-e', 'POSTGRES_DB=artex', PG_IMAGE)
+    start_postgres_compose(compose_dir)
     for attempt in range(60):
         if docker('exec', pg, 'pg_isready', '-U', 'artex', check=False).returncode == 0:
             break
@@ -120,13 +161,19 @@ try:
     expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': password}), 401)
     fresh = expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': new_password}), 200)['token']
     expect(api('/api/tasks', token=fresh), 200)
+    revoke_sessions_with_compose(compose_dir)
+    expect(api('/api/tasks', token=fresh), 401)
+    renewed = expect(api('/api/auth/login', 'POST', {'username': 'ARTEX', 'password': new_password}), 200)['token']
+    expect(api('/api/tasks', token=renewed), 200)
+    print('Compose session revocation rejected the old token and preserved the administrator password')
 except Exception:
     for container in (app, pg):
         print(docker('logs', '--tail', '80', container, check=False).stderr, file=sys.stderr)
     raise
 finally:
     for container in (app, pg):
-        docker('rm', '-f', container, check=False)
+        docker('rm', '-f', '-v', container, check=False)
     docker('network', 'rm', name, check=False)
     for volume in (data, keys):
         docker('volume', 'rm', volume, check=False)
+    compose_fixture.cleanup()
