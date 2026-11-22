@@ -16,6 +16,8 @@ Put the printed `MANDATE_SETUP_TOKEN_SHA256=...` line in `.env.safe` before star
 
 ## Browser sessions
 
+Upgrading to the new session key format signs everyone out once. Sign in again with your existing password. The server generates a fresh 32-byte key in `keys/session-v2.key` beside the executable (in the existing keys volume for Compose). The storage filesystem must support hard links. Protect this directory with owner-only write access and keep it outside the browsable data directory. On Windows, restrict its ACL to the service account and trusted administrators. Legacy `jwt.key` files and backups can contain secrets accepted by older builds. This upgrade leaves those files untouched and retires their keys on the upgraded server.
+
 The console defaults to `127.0.0.1:8787` and the recording proxy to `127.0.0.1:8788`. Use `--listen` (or `-addr`) for the console. Either listener requires `MANDATE_I_UNDERSTAND_THIS_IS_DANGEROUS=yes` for an address other than a numeric loopback IP. Compose sets this inside the app container so Docker can forward the console port to host loopback. Other containers on that Compose network can still reach the console. The recording proxy listens only on the app container's loopback interface by default.
 
 The bundled console uses same-origin cookies for event streams. Session tokens in URL query parameters are rejected. During local UI development, use the same hostname for both ports and set `MANDATE_STREAM_UI_ORIGIN` on the backend to the exact frontend origin (for example, `http://localhost:3000`). This grants that origin credentialed read access. Prefer same-origin routing in production. When upgrading, treat earlier access logs containing session URLs as sensitive until those sessions expire.

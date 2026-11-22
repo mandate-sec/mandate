@@ -107,7 +107,6 @@ COPY start.sh /app/start.sh
 COPY skills/ /app/skills/
 RUN chmod +x /app/artex /app/start.sh \
     && mkdir -p /app/data /app/keys /app/.playwright \
-    && ln -sfn /app/keys/jwt.key /app/jwt.key \
     && printf '%s\n' '{"browser":{"browserName":"chromium","launchOptions":{"args":["--no-sandbox"]}}}' > /app/.playwright/cli.config.json
 
 # Upstream runs as root; keep that for tool parity. compose adds
