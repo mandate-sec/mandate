@@ -2,17 +2,11 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a security problem. Report it privately:
+Open the [Security tab for mandate-sec/mandate](https://github.com/mandate-sec/mandate/security) and check for **Report a vulnerability**. If available, use that private form. Include the affected commit or release, the impact you observed, and a minimal example using synthetic data.
 
-- **Email:** security@failsafe.security (replace with the monitored address)
-- **GitHub:** use the repository's private vulnerability reporting form
+If the form is unavailable, ask the Mandate maintainer to enable private reporting or provide a verified private contact. Keep that request free of vulnerability details. Redact credentials, session tokens, private keys, and client traffic from any evidence you share.
 
-Include the affected version, a description, and a minimal reproduction. We
-will acknowledge within 3 business days and coordinate disclosure.
-
-For vulnerabilities in upstream ARTEX itself, also notify the upstream
-maintainers. For the November 2026 image backdoor, see the indicators in
-[`UPSTREAM.md`](UPSTREAM.md) and [`audit/artex-v0.3.15-audit.md`](audit/artex-v0.3.15-audit.md).
+For the historical upstream image investigation, see [the provenance notes](PROVENANCE.md) and [the source audit](audit/artex-v0.3.15-audit.md).
 
 ## Supported versions
 
