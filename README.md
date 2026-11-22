@@ -151,6 +151,8 @@ If you want a managed run or model access, contact us:
 
 ## Quick start
 
+Compose builds the local application image `mandate-local:source` from this checkout with `--build`. The Makefile’s shell and verification commands require the local image. Base images and PostgreSQL are still registry dependencies.
+
 Requirements: Docker Engine with Compose v2, and about 5 GB of free disk
 (the browser stack and Chromium account for most of the image size).
 If your Docker installation only provides the standalone `docker-compose`

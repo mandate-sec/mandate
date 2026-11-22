@@ -22,7 +22,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.safe
-    image: failsafe-security/artex:v0.3.15-safe
+    image: mandate-local:source
+    pull_policy: never
     # Docker's port forward needs a container-network listener. Publish only to host loopback.
     command: ["-listen", ":8787", "-proxy", "127.0.0.1:8788"]
     depends_on:

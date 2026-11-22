@@ -1,4 +1,4 @@
-IMAGE ?= failsafe-security/artex:v0.3.15-safe
+IMAGE ?= mandate-local:source
 COMPOSE_BIN ?= $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
 COMPOSE ?= $(COMPOSE_BIN) --env-file .env.safe -f docker-compose.safe.yml
 
@@ -20,10 +20,10 @@ ps:
 	$(COMPOSE) ps
 
 shell:
-	docker run --rm -it --network none --entrypoint /bin/sh $(IMAGE)
+	docker run --pull=never --rm -it --network none --entrypoint /bin/sh $(IMAGE)
 
 verify:
-	docker run --rm --network none --shm-size=1g --entrypoint /bin/sh $(IMAGE) -c '\
+	docker run --pull=never --rm --network none --shm-size=1g --entrypoint /bin/sh $(IMAGE) -c '\
 	  set -eu; \
 	  sha256sum /app/artex; \
 	  binary_strings=$$(mktemp); \
