@@ -111,6 +111,10 @@ var httpClient = &http.Client{
 		if len(via) >= 5 {
 			return errors.New("重定向次数过多")
 		}
+		// A redirect must preserve the transport protection of the configured endpoint.
+		if len(via) > 0 && req.URL.Scheme != via[0].URL.Scheme {
+			return errors.New("refusing notification redirect across schemes")
+		}
 		if len(via) > 0 && req.URL.Host != via[0].URL.Host {
 			return fmt.Errorf("拒绝跨主机重定向（%s → %s）", via[0].URL.Host, req.URL.Host)
 		}

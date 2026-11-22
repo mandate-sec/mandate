@@ -9,6 +9,30 @@ import (
 	"testing"
 )
 
+func TestNotificationRedirectPreservesScheme(t *testing.T) {
+	first, err := http.NewRequest(http.MethodPost, "https://notify.example/event", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		url     string
+		allowed bool
+	}{
+		{"https://notify.example/event/", true},
+		{"http://notify.example/event/", false},
+		{"https://notify.example:8443/event/", false},
+		{"https://other.example/event/", false},
+	} {
+		next, err := http.NewRequest(http.MethodPost, tc.url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := httpClient.CheckRedirect(next, []*http.Request{first}); (err == nil) != tc.allowed {
+			t.Errorf("redirect to %s: allowed=%v, got error %v", tc.url, tc.allowed, err)
+		}
+	}
+}
+
 // 本文件覆盖 doJSON 的 HTTP 层错误分级。
 //
 // 为什么要单独测：各渠道适配器只管平台自己的业务错误码（钉钉 errcode、
