@@ -1,11 +1,70 @@
 package traffic
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRestoreRequiresVerifiedBlobReferences(t *testing.T) {
+	tr, _ := openTraffic(t)
+	dir := t.TempDir()
+	body := []byte("archived content")
+	hash := fmt.Sprintf("%x", sha256.Sum256(body))
+	snap := ArchiveSnapshot{Version: 1, Exchanges: []ArchiveExchange{{ID: "archive-ref", RespBlob: hash}}}
+	save := func() {
+		b, err := json.Marshal(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "traffic.json"), b, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save()
+	reject := func() {
+		t.Helper()
+		if n, err := tr.ImportArchive(dir); err == nil || n != 0 {
+			t.Fatalf("invalid restore: %d, %v", n, err)
+		}
+		var count int
+		if err := tr.DB().QueryRow("SELECT COUNT(*) FROM exchanges").Scan(&count); err != nil || count != 0 {
+			t.Fatalf("unexpected rows %d: %v", count, err)
+		}
+	}
+	reject()
+	snap.Blobs = []string{hash}
+	save()
+	if err := os.Mkdir(filepath.Join(dir, "blobs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "blobs", hash+".bin")
+	if err := os.WriteFile(src, []byte("damaged archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reject()
+	if err := os.WriteFile(src, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(tr.dir, "_blobs", "sha256", hash[:2], hash+".bin")
+	if err := os.WriteFile(dest, []byte("damaged local file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reject()
+	if err := os.Remove(dest); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := tr.ImportArchive(dir); err != nil || n != 1 {
+		t.Fatalf("valid restore: %d, %v", n, err)
+	}
+	if n, err := tr.ImportArchive(dir); err != nil || n != 0 {
+		t.Fatalf("retry: %d, %v", n, err)
+	}
+}
 
 func TestTrafficArchiveRoundTripAndCurrentRowWins(t *testing.T) {
 	trafficDir := t.TempDir()

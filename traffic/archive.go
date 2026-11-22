@@ -1,12 +1,14 @@
 package traffic
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -133,7 +135,15 @@ func (t *Traffic) ImportArchive(dir string) (int64, error) {
 	if t == nil {
 		return 0, nil
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "traffic.json"))
+	archive, err := os.OpenRoot(dir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer archive.Close()
+	raw, err := archive.ReadFile("traffic.json")
 	if os.IsNotExist(err) {
 		return 0, nil
 	}
@@ -147,28 +157,30 @@ func (t *Traffic) ImportArchive(dir string) (int64, error) {
 	if snapshot.Version != 1 {
 		return 0, fmt.Errorf("unsupported traffic archive version %d", snapshot.Version)
 	}
-	t.wmu.Lock()
-	defer t.wmu.Unlock()
+	available := make(map[string]bool, len(snapshot.Blobs))
 	for _, hash := range snapshot.Blobs {
 		if !blobHashRe.MatchString(hash) {
-			return 0, fmt.Errorf("invalid archived traffic blob %q", hash)
+			return 0, errors.New("invalid archived traffic blob hash")
 		}
-		data, err := os.ReadFile(filepath.Join(dir, "blobs", hash+".bin"))
-		if err != nil {
+		available[hash] = true
+	}
+	for _, item := range snapshot.Exchanges {
+		for _, hash := range []string{item.ReqBlob, item.RespBlob} {
+			if hash != "" && !available[hash] {
+				return 0, errors.New("archive exchange references an undeclared blob")
+			}
+		}
+	}
+	t.wmu.Lock()
+	defer t.wmu.Unlock()
+	root, err := os.OpenRoot(t.dir)
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
+	for hash := range available {
+		if err := restoreArchiveBlob(archive, root, hash); err != nil {
 			return 0, err
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != hash {
-			return 0, fmt.Errorf("traffic blob checksum mismatch: %s", hash)
-		}
-		destination := filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash+".bin")
-		if _, err := os.Stat(destination); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-				return 0, err
-			}
-			if err := os.WriteFile(destination, data, 0o644); err != nil {
-				return 0, err
-			}
 		}
 	}
 	tx, err := t.db.Begin()
@@ -182,40 +194,87 @@ func (t *Traffic) ImportArchive(dir string) (int64, error) {
 VALUES(?,?,?,?,?,?,?,?,?,?,'')`, item.ID, item.TS, item.Host, item.Method, item.URLTemplate,
 			item.URL, item.Status, item.ContentType, item.ReqLen, item.RespLen)
 		if err != nil {
-			return imported, err
+			return 0, err
 		}
-		n, _ := res.RowsAffected()
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
 		if n == 0 {
 			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,req_blob,resp_head,resp_body,resp_blob)
 VALUES(?,?,?,?,?,?,?)`, item.ID, item.ReqHead, item.ReqBody, nullIfEmpty(item.ReqBlob),
 			item.RespHead, item.RespBody, nullIfEmpty(item.RespBlob)); err != nil {
-			return imported, err
+			return 0, err
 		}
 		for _, hash := range []string{item.ReqBlob, item.RespBlob} {
 			if hash != "" {
 				if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_refs(hash,exchange_id) VALUES(?,?)`, hash, item.ID); err != nil {
-					return imported, err
+					return 0, err
 				}
 			}
 		}
 		if t.fts {
 			var rowID int64
 			if err := tx.QueryRow(`SELECT rowid FROM exchanges WHERE id=?`, item.ID).Scan(&rowID); err != nil {
-				return imported, err
+				return 0, err
 			}
 			content := strings.Join([]string{item.URL, item.ReqHead, string(item.ReqBody), item.RespHead, string(item.RespBody)}, "\n")
 			if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowID, content); err != nil {
-				return imported, err
+				return 0, err
 			}
 		}
 		imported++
 	}
 	if err := tx.Commit(); err != nil {
-		return imported, err
+		return 0, err
 	}
 	return imported, nil
+}
+
+// Publish only complete, verified bodies. An interrupted copy leaves no final file.
+func restoreArchiveBlob(archive, root *os.Root, hash string) error {
+	source, err := archive.Open(filepath.Join("blobs", hash+".bin"))
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	bucket := filepath.Join("_blobs", "sha256", hash[:2])
+	if err := root.MkdirAll(bucket, 0700); err != nil {
+		return err
+	}
+	temp := filepath.Join(bucket, ".restore-"+rand.Text())
+	f, err := root.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(temp)
+	digest := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(f, digest), source)
+	if err := errors.Join(copyErr, f.Close()); err != nil {
+		return err
+	}
+	if hex.EncodeToString(digest.Sum(nil)) != hash {
+		return fmt.Errorf("traffic blob checksum mismatch: %s", hash)
+	}
+	dest := filepath.Join(bucket, hash+".bin")
+	existing, err := root.Open(dest)
+	if errors.Is(err, os.ErrNotExist) {
+		return root.Rename(temp, dest)
+	}
+	if err != nil {
+		return err
+	}
+	defer existing.Close()
+	digest.Reset()
+	if _, err := io.Copy(digest, existing); err != nil {
+		return err
+	}
+	if hex.EncodeToString(digest.Sum(nil)) != hash {
+		return fmt.Errorf("stored traffic blob checksum mismatch: %s", hash)
+	}
+	return nil
 }
 
 func uniqueArchiveHosts(hosts []string) []string {
