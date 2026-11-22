@@ -849,6 +849,15 @@ func (s *Server) pgListMCP(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
+	if r.URL.Query().Get("view") == "summary" {
+		rows, err := pg.ListMCPSummaries()
+		if err != nil {
+			writeErr(w, 500, "Could not list MCP servers")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"servers": rows})
+		return
+	}
 	ms, err := pg.ListMCP()
 	if err != nil {
 		writeErr(w, 500, err.Error())

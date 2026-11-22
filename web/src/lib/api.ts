@@ -62,6 +62,7 @@ import type {
   LLMRetryPolicy,
   LLMTask,
   MCPServer,
+  MCPServerSummary,
   MCPTool,
   MissingSkill,
   ModelTokenStat,
@@ -1085,6 +1086,7 @@ export const api = {
   detectPython: () => post<{ python_interpreter: string }>("/settings/python/detect", {}),
 
   // ---- mcp ----
+  mcpSummaries: () => get<{ servers: MCPServerSummary[] }>("/mcp?view=summary").then((r) => arr(r.servers)),
   mcpServers: () => get<{ servers: MCPServer[] }>("/mcp").then((r) => arr(r.servers)),
   saveMcpServer: (m: Partial<MCPServer>) => post<{ id: number }>("/mcp", m),
   deleteMcpServer: (id: number) => del<{ deleted: number }>(`/mcp/${id}`),

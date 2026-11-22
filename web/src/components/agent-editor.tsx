@@ -26,7 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Markdown } from "@/components/markdown";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { Agent, AgentDetail, AgentTrigger, MCPServer, PromptVar, PromptVersion, Settings, SkillItem, Tool } from "@/lib/types";
+import type { Agent, AgentDetail, AgentTrigger, MCPServerSummary, PromptVar, PromptVersion, Settings, SkillItem, Tool } from "@/lib/types";
 
 // Traffic tools are host tools gated by the global traffic-capture switch: bindable, but
 // only usable when capture is on. Keep this list in sync with traffic.SeedToolMetas.
@@ -39,7 +39,7 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   const [detail, setDetail] = React.useState<AgentDetail | null>(null);
   const [versions, setVersions] = React.useState<PromptVersion[]>([]);
   const [variables, setVariables] = React.useState<PromptVar[]>([]);
-  const [mcp, setMcp] = React.useState<MCPServer[]>([]);
+  const [mcp, setMcp] = React.useState<MCPServerSummary[]>([]);
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [loaded, setLoaded] = React.useState(false);
@@ -70,7 +70,7 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   const [settings, setSettings] = React.useState<Settings | null>(null);
 
   React.useEffect(() => {
-    api.mcpServers().then(setMcp).catch(() => {});
+    api.mcpSummaries().then(setMcp).catch(() => {});
     api.skills().then(setSkills).catch(() => {});
     api.tools().then(setTools).catch(() => {});
     api.settings().then(setSettings).catch(() => {});

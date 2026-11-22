@@ -1181,6 +1181,8 @@ export interface MCPServer {
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
+export type MCPServerSummary = Pick<MCPServer, "id" | "name" | "transport">;
+
 export interface MCPTool {
   name: string;
   description: string;

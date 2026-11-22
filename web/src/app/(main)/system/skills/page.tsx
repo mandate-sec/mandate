@@ -43,7 +43,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { Agent, SkillItem, MCPServer, SkillCall, MissingSkill } from "@/lib/types";
+import type { Agent, SkillItem, MCPServerSummary, SkillCall, MissingSkill } from "@/lib/types";
 
 function fmtTime(ts?: string) {
   if (!ts) return "Never called";
@@ -322,7 +322,7 @@ export default function SkillsPage() {
   const [newInst, setNewInst] = React.useState("");
   const [newMcps, setNewMcps] = React.useState<string[]>([]);
   const [newVisibility, setNewVisibility] = React.useState<string[]>([]);
-  const [mcpOptions, setMcpOptions] = React.useState<MCPServer[]>([]);
+  const [mcpOptions, setMcpOptions] = React.useState<MCPServerSummary[]>([]);
   const [creatingSkill, setCreatingSkill] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const uploadRef = React.useRef<HTMLInputElement>(null);
@@ -343,7 +343,7 @@ export default function SkillsPage() {
   // ── Data ──────────────────────────────────────────────────────────────────
   const load = React.useCallback(() => {
     api.agents().then(setAgents).catch(() => {});
-    api.mcpServers().then(setMcpOptions).catch(() => {});
+    api.mcpSummaries().then(setMcpOptions).catch(() => {});
     api.missingSkills().then(setMissing).catch(() => {});
     api.skills().then((ss) => {
       setSkills(ss);

@@ -29,7 +29,6 @@ import type {
   Finding,
   InterceptPending,
   LLMProfile,
-  MCPServer,
   Settings,
   SkillItem,
   Stats,
@@ -143,7 +142,6 @@ export default function DashboardPage() {
   const [assetCounts, setAssetCounts] = React.useState<Record<string, number>>({});
   const [traffic, setTraffic] = React.useState<TrafficExchange[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
-  const [mcpServers, setMcpServers] = React.useState<MCPServer[]>([]);
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [llmProfiles, setLLMProfiles] = React.useState<LLMProfile[]>([]);
@@ -223,11 +221,10 @@ export default function DashboardPage() {
     let alive = true;
     const load = async () => {
       try {
-        const [traf, counts, agentList, mcpList, skillList, toolList, profileList, usage] = await Promise.all([
+        const [traf, counts, agentList, skillList, toolList, profileList, usage] = await Promise.all([
           api.traffic(0, 50),
           api.assetCounts(),
           api.agents(),
-          api.mcpServers(),
           api.skills(),
           api.tools(),
           api.llmProfiles(),
@@ -237,7 +234,6 @@ export default function DashboardPage() {
         setTraffic(traf.exchanges ?? []);
         setAssetCounts(counts ?? {});
         setAgents(agentList);
-        setMcpServers(mcpList);
         setSkills(skillList);
         setTools(toolList);
         setLLMProfiles(profileList);

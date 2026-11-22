@@ -821,6 +821,29 @@ type MCPServer struct {
 	Tools     []string        `json:"tools,omitempty"` // cached tool names (mcp_tools_cache)
 }
 
+type MCPServerSummary struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Transport string `json:"transport"`
+}
+
+func (d *DB) ListMCPSummaries() ([]MCPServerSummary, error) {
+	rows, err := d.Query("SELECT id,name,transport FROM mcp_servers ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MCPServerSummary{}
+	for rows.Next() {
+		var summary MCPServerSummary
+		if err := rows.Scan(&summary.ID, &summary.Name, &summary.Transport); err != nil {
+			return nil, err
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) ListMCP() ([]*MCPServer, error) {
 	rows, err := d.Query(`SELECT id,name,transport,COALESCE(command,''),args,env,COALESCE(url,''),enabled,insecure FROM mcp_servers ORDER BY id`)
 	if err != nil {
