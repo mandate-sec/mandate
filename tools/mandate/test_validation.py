@@ -1,11 +1,26 @@
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_submicrosecond_validity_boundaries(self):
+        record = dict(engagement="Local review", authorized_by=dict(name="Owner", email="owner@example.org", key_fingerprint="test"),
+                      scope=dict(targets=["localhost"], checks=["web_scan"], excluded=[]),
+                      constraints=dict(no_dos=True, no_social_engineering=True, max_concurrency=1),
+                      valid_from="2030-01-01T00:00:00.0000001Z", expires="2030-01-01T00:00:00.0000011Z")
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        with self.assertRaisesRegex(ValueError, "validity window"):
+            mandate.validate(record, now)
+        mandate.validate(record, now.replace(microsecond=1))
+        with self.assertRaisesRegex(ValueError, "validity window"):
+            mandate.validate(record, now.replace(microsecond=2))
+        self.assertEqual(mandate.timestamp(record["expires"]),
+                         mandate.timestamp("2030-01-01T01:00:00.000001100+01:00"))
+
     def test_rejection_is_single_line_and_bounded(self):
         detail = "duplicate field: x\n\x1b[0m\u202ey" + "z" * 10000
         message = mandate.rejection_message(ValueError(detail))

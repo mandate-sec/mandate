@@ -42,11 +42,14 @@ def exact(obj, fields):
 
 
 def timestamp(value):
-    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)", value):
+    """An ordered instant: datetime through microseconds, then remaining fractional digits."""
+    match = re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.(\d+))?(?:Z|[+-]\d\d:\d\d)", value, re.ASCII) if isinstance(value, str) else None
+    if match is None:
         raise ValueError("expected RFC3339 timestamp with timezone")
     if value[-1] != "Z" and (int(value[-5:-3]) > 23 or int(value[-2:]) > 59):
         raise ValueError("invalid timezone offset")
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    fraction = match.group(1) or ""
+    return datetime.fromisoformat(value.replace("Z", "+00:00")), fraction[6:].rstrip("0")
 
 
 def expiry(value):
@@ -88,7 +91,8 @@ def validate(obj, now, allow_expired=False):
     if c["no_dos"] is not True or c["no_social_engineering"] is not True or type(c["max_concurrency"]) is not int or not 1 <= c["max_concurrency"] <= 10:
         raise ValueError("invalid constraints")
     start, end = timestamp(obj["valid_from"]), timestamp(obj["expires"])
-    if start >= end or now < start or (not allow_expired and now >= end):
+    current = (now, "")
+    if start >= end or current < start or (not allow_expired and current >= end):
         raise ValueError("mandate outside validity window")
 
 
