@@ -99,6 +99,7 @@ if [ -z "${ARTEX_BUILD_VERSION:-}" ]; then
 fi
 # Release tags are commonly passed as v0.3.3; keep the binary version consistent.
 ARTEX_BUILD_VERSION="${ARTEX_BUILD_VERSION#v}"
+[[ "$ARTEX_BUILD_VERSION" =~ ^[a-zA-Z0-9._+-]+$ ]] || die "invalid build version"
 ARTEX_OUTPUT_DIR="${ARTEX_OUTPUT_DIR:-dist}"
 ARTEX_PACKAGE_DIR="${ARTEX_PACKAGE_DIR:-$ARTEX_OUTPUT_DIR}"
 ARTEX_UPX_ARGS="${ARTEX_UPX_ARGS:---best --lzma}"
@@ -161,34 +162,26 @@ compress_binary() {
   ok "UPX compression complete: $binary (${before} -> ${after} bytes)"
 }
 
-package_binary() {
-  binary="$1"
-  goos="$2"
-  goarch="$3"
-  package_name="artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}"
-  package_root="${ARTEX_PACKAGE_DIR}/${package_name}"
-  archive="${ARTEX_PACKAGE_DIR}/${package_name}.zip"
+package_binary() (
+  local binary="$1" goos="$2" goarch="$3"
+  local package_name="artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}"
+  local archive="${ARTEX_PACKAGE_DIR}/${package_name}.zip"
+  local launcher=start.sh temporary
+  [ "$goos" != windows ] || launcher=start.bat
+  [ -f "$binary" ] && [ ! -L "$binary" ] || die "expected a regular release binary"
+  [ ! -d "$archive" ] || die "archive destination is a directory"
+  temporary=$(mktemp "${ARTEX_PACKAGE_DIR}/.release.XXXXXXXX")
+  trap 'rm -f -- "$temporary"' EXIT
 
-  command -v zip >/dev/null 2>&1 || die "packaging requires zip"
-  rm -rf "$package_root" "$archive"
-  mkdir -p "$package_root"
-  cp "$binary" "$package_root/"
-  # The supervisor startup script is the official entry point: the one-click update in the UI relies on it
-  # to restart the process after exit. Running the artex binary directly would leave it down after an update.
-  # Ship only the variant matching the target OS.
-  if [ "$goos" = "windows" ]; then
-    cp start.bat "$package_root/"
-  else
-    cp start.sh "$package_root/"
-    chmod +x "$package_root/start.sh"
-  fi
-  cp -R skills "$package_root/"
-  cp config.example.json "$package_root/"
-  if [ -f README.md ]; then cp README.md "$package_root/"; fi
-  (cd "$ARTEX_PACKAGE_DIR" && zip -q -r -9 "$(basename "$archive")" "$(basename "$package_root")")
-  rm -rf "$package_root"
+  # Package committed resources only. Local credentials and modified launcher
+  # scripts must never become part of a release by accident.
+  git archive --format=zip -9 --output="$temporary" --prefix="$package_name/" \
+    --add-file="$binary" HEAD -- skills "$launcher" config.example.json README.md \
+    ':(exclude,glob,icase)**/.npmrc' ':(exclude,glob,icase)**/.env' \
+    ':(exclude,glob,icase)**/.env.*'
+  mv -f -- "$temporary" "$archive"
   ok "Release archive: $archive"
-}
+)
 
 build_target() {
   target="$1"
@@ -198,6 +191,7 @@ build_target() {
   esac
   goos="${target%%/*}"
   goarch="${target##*/}"
+  [[ "$goarch" =~ ^[a-zA-Z0-9_]+$ ]] || die "invalid target architecture"
   case "$goos" in
     linux|darwin|windows) ;;
     *) die "unsupported OS: $goos (supported: linux, darwin, windows)" ;;
