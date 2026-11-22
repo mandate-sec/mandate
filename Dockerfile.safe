@@ -91,13 +91,13 @@ RUN set -eux; \
 # run `npm install` at runtime. runtime_harvest.js resolves it by the absolute
 # ARTEX_PUPPETEER_PATH below, so a node_modules/ in a scanned workspace cannot
 # shadow it.
-COPY skills/api-recon/scripts/package.json skills/api-recon/scripts/package-lock.json skills/api-recon/scripts/.npmrc /opt/api-recon-runtime/
+COPY skills/api-recon/scripts/package.json skills/api-recon/scripts/package-lock.json /opt/api-recon-runtime/
 # jq guard: every resolved URL in the lockfile must be the official registry.
 # Parsing the JSON is robust to formatting (unlike a line grep). jq is installed
 # above.
 RUN cd /opt/api-recon-runtime \
     && jq -e '[.packages[].resolved? // empty] | all(startswith("https://registry.npmjs.org/"))' package-lock.json > /dev/null \
-    && npm ci --ignore-scripts \
+    && npm ci --ignore-scripts --registry=https://registry.npmjs.org/ --replace-registry-host=never --no-fund \
     && npm cache clean --force \
     && rm -rf /root/.npm
 
