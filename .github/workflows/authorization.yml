@@ -1,0 +1,49 @@
+name: Authorization checks
+
+on:
+  push:
+    paths:
+      - "tools/mandate/**"
+      - "server/session_key*.go"
+      - "server/session_owner*.go"
+      - ".github/workflows/authorization.yml"
+  pull_request:
+    paths:
+      - "tools/mandate/**"
+      - "server/session_key*.go"
+      - "server/session_owner*.go"
+      - ".github/workflows/authorization.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-records:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --only-binary=:all: -r tools/mandate/requirements.txt
+      - run: python -B -m unittest discover -s tools/mandate -v
+
+  unix-session-keys:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.10"
+          cache: false
+      - name: Verify session key identity and file modes
+        working-directory: server
+        run: go test -count=1 -v session_key.go session_owner_unix.go session_key_test.go session_key_unix_test.go
