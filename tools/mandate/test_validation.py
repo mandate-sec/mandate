@@ -1,6 +1,9 @@
 import tempfile
 import unittest
 import getpass
+import os
+import subprocess
+import sys
 from io import StringIO
 from unittest.mock import patch
 from datetime import datetime, timezone
@@ -10,6 +13,22 @@ import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_device_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            mandate.read_key(Path(os.devnull))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires a POSIX FIFO")
+    def test_fifo_without_writer_is_rejected_promptly(self):
+        with tempfile.TemporaryDirectory() as folder:
+            fifo = Path(folder) / "key"
+            os.mkfifo(fifo)
+            result = subprocess.run(
+                [sys.executable, mandate.__file__, "verify", "--trusted-key", str(fifo)],
+                capture_output=True, text=True, timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("expected a regular file", result.stderr)
+
     def test_visible_passphrase_fallback_reads_nothing(self):
         source = StringIO("synthetic passphrase\n")
         with patch("sys.stdin", source), patch.object(getpass, "getpass", getpass.fallback_getpass):

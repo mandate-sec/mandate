@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 import unicodedata
@@ -111,12 +112,24 @@ def write_new(path, data):
         f.write(data)
 
 
+def read_regular_file(path, limit, size_error):
+    # A byte limit alone cannot bound a read from a pipe waiting for a writer.
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("expected a regular file")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            data = stream.read(limit + 1)
+    finally:
+        os.close(fd)
+    if len(data) > limit:
+        raise ValueError(size_error)
+    return data
+
+
 def read_key(path):
-    with path.open("rb") as stream:
-        pem = stream.read(MAX_KEY_BYTES + 1)
-    if len(pem) > MAX_KEY_BYTES:
-        raise ValueError("key file exceeds size limit")
-    return pem
+    return read_regular_file(path, MAX_KEY_BYTES, "key file exceeds size limit")
 
 
 def signing_passphrase(prompt):
@@ -147,10 +160,7 @@ def signed(obj, key):
 
 def check_approval(obj, path):
     """Compare a verified record with a grant provisioned by its reviewer."""
-    with path.open("rb") as stream:
-        raw = stream.read(65537)
-    if len(raw) > 65536:
-        raise ValueError("approval exceeds 64 KiB")
+    raw = read_regular_file(path, 65536, "approval exceeds 64 KiB")
     grant = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     exact(grant, "engagement key_fingerprint targets checks max_concurrency expires")
     if grant["engagement"] != obj["engagement"]:
@@ -197,10 +207,7 @@ def verify(path, key_path, now=None, allow_expired=False):
     key = ser.load_pem_public_key(read_key(key_path))
     if not isinstance(key, Ed25519PublicKey):
         raise ValueError("expected Ed25519 trusted key")
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_RECORD_BYTES + 1)
-    if len(raw) > MAX_RECORD_BYTES:
-        raise ValueError("mandate exceeds size limit")
+    raw = read_regular_file(path, MAX_RECORD_BYTES, "mandate exceeds size limit")
     obj = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(obj, dict) or "signature" not in obj:
         raise ValueError("missing signature")
