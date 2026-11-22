@@ -45,7 +45,7 @@ usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 # ---- Argument parsing ------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -m|--mode)        MODE="${2:-}"; shift 2 ;;
+    -m|--mode)        MODE="${2:-}"; [[ "$MODE" == local || "$MODE" == docker ]] || die "--mode requires local or docker"; shift 2 ;;
     --dsn)            DSN="${2:-}"; shift 2 ;;
     -H|--host)        HOST="${2:-}"; shift 2 ;;
     -P|--port)        PORT="${2:-}"; shift 2 ;;
@@ -55,7 +55,7 @@ while [[ $# -gt 0 ]]; do
     --sslmode)        SSLMODE="${2:-}"; shift 2 ;;
     --config)         CONFIG="${2:-}"; shift 2 ;;
     -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
-    --exec)           EXEC_KIND="${2:-}"; shift 2 ;;
+    --exec)           EXEC_KIND="${2:-}"; [[ "$EXEC_KIND" == compose || "$EXEC_KIND" == docker ]] || die "--exec requires compose or docker"; shift 2 ;;
     -p|--new-password) NEWPASS="${2:-}"; shift 2 ;;
     -y|--yes)         ASSUME_YES=1; shift ;;
     -h|--help)        usage ;;
@@ -123,13 +123,21 @@ fi
 
 # ---- Auto-detect mode ------------------------------------------------------
 if [[ -z "$MODE" ]]; then
-  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
+  if [[ -n "$EXEC_KIND$CONTAINER" ]]; then
+    MODE="docker"
+  elif [[ -n "$DSN$HOST$USER$DBNAME" || -n "${ARTEX_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
     MODE="local"
   elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.safe.yml || -f docker-compose.yml ]]; then
     MODE="docker"
   else
     MODE="local"
   fi
+fi
+if [[ "$MODE" == docker && -n "$DSN$HOST$PORT$SSLMODE$CONFIG" ]]; then
+  die "Docker recovery cannot apply local connection options"
+fi
+if [[ "$MODE" == local && -n "$EXEC_KIND$CONTAINER" ]]; then
+  die "Local recovery cannot apply container options"
 fi
 info "Deployment mode: $MODE"
 
