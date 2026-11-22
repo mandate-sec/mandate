@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./start.sh                        Run in the foreground (Ctrl-C to stop)
-#   nohup ./start.sh >artex.log 2>&1 &    Run in the background
+#   (umask go-rwx && nohup ./start.sh >artex.log 2>&1) &    Run in the background
 #   ./start.sh -addr :9000            Extra arguments are passed through to artex
 #
 # It does one thing only: run artex, then decide from the exit code whether to
@@ -20,6 +20,8 @@
 # hand. So verification/swapping all stays in Go (the selfupdate package), done
 # by artex itself at startup; the script stays simple.
 set -u
+# Keep newly created runtime files private while preserving owner restrictions.
+umask go-rwx || exit 1
 
 cd "$(dirname "$0")" || exit 1
 
