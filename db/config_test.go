@@ -87,17 +87,42 @@ func TestConfigStores(t *testing.T) {
 	if err != nil || act == nil || act.APIKey != "secret123" {
 		t.Fatalf("active profile/key: %+v err=%v", act, err)
 	}
-	// list must hide the key, expose hint
-	list, _ := d.ListProfiles()
+	// Existing databases may contain a previously disclosed suffix.
+	if _, err := d.Exec(`UPDATE llm_profiles SET api_key_hint='…t123' WHERE id=$1`, pid); err != nil {
+		t.Fatal(err)
+	}
+	list, err := d.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
 	for _, p := range list {
 		if p.ID == pid {
+			found = true
 			b, _ := json.Marshal(p)
 			if string(b) == "" || contains(string(b), "secret123") {
 				t.Fatalf("api key leaked in list json: %s", b)
 			}
-			if p.APIKeyHint != "…t123" {
-				t.Fatalf("hint want …t123, got %q", p.APIKeyHint)
+			if p.APIKeyHint != "Configured" {
+				t.Fatalf("hint want Configured, got %q", p.APIKeyHint)
 			}
+		}
+	}
+
+	if !found {
+		t.Fatal("saved profile missing from list")
+	}
+	for _, key := range []string{"1234", ""} {
+		if _, err := d.SaveProfile(&LLMProfile{ID: pid, Name: "t-default", Format: "openai", Model: "gpt-x", APIKey: key}); err != nil {
+			t.Fatal(err)
+		}
+		var saved string
+		var hasHint bool
+		if err := d.QueryRow(`SELECT api_key, api_key_hint IS NOT NULL FROM llm_profiles WHERE id=$1`, pid).Scan(&saved, &hasHint); err != nil {
+			t.Fatal(err)
+		}
+		if saved != "1234" || hasHint {
+			t.Fatal("profile update must preserve the configured key without storing a suffix")
 		}
 	}
 
