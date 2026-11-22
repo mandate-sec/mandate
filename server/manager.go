@@ -354,6 +354,9 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	if err := traffic.CheckLegacyCA(filepath.Join(dir, "traffic")); err != nil {
+		return nil, err
+	}
 	dsn, source, err := pgdb.DSN()
 	if err != nil {
 		return nil, err
@@ -400,7 +403,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		if tr != nil {
 			m.traffic = tr
 			go func() {
-				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
+				log.Printf("[traffic] recording proxy on %s", proxyAddr)
 				if err := tr.Start(); err != nil {
 					log.Printf("[traffic] proxy stopped: %v", err)
 				}

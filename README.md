@@ -28,6 +28,10 @@ The bundled console uses same-origin cookies for event streams. Session tokens i
 
 ## Workspace files
 
+**Upgrade from older recording proxies.** Earlier builds wrote the proxy CA's private signing key to `traffic/_ca/mitmproxy-ca.pem` inside the browsable data directory. If that file exists, startup stops before the console opens. Move it out of the workspace into protected offline storage and remove the old CA certificate from every client that trusted it. A copied private key can still impersonate services to clients that retain that trust.
+
+Each new proxy instance keeps its signing key in memory and writes only its public certificate to a temporary file. The public certificate changes on restart. Avoid permanently trusting an instance certificate on the host.
+
 The recording proxy verifies upstream HTTPS certificates using the system trust store. Private HTTPS services need a trusted issuing CA. A protocol failure no longer switches future connections to that host into an unrecorded tunnel.
 
 Remote MCP connections and the enrichment HTTP client also verify HTTPS certificates. Saved MCP configurations with the legacy certificate bypass setting now use verification. New configurations requesting the bypass are rejected. A proxied HTTPS connection will fail if the client does not trust the issuer presented by the proxy.

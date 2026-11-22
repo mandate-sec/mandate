@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/lqqyt2423/go-mitmproxy/cert"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
 	_ "modernc.org/sqlite"
 )
@@ -135,12 +137,13 @@ const TrafficSearchDescription = "查询记录代理已抓取的目标流量（�
 
 // Traffic runs the recording proxy and owns the file tree + index.
 type Traffic struct {
-	dir   string
-	addr  string
-	db    *sql.DB
-	wmu   sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
-	seq   atomic.Int64
-	proxy *mproxy.Proxy
+	publicCertPath string
+	dir            string
+	addr           string
+	db             *sql.DB
+	wmu            sync.Mutex // serializes record() vs DeleteHost (incl. blob GC)
+	seq            atomic.Int64
+	proxy          *mproxy.Proxy
 	// fts reports whether the full-text index is available. False on a driver
 	// build without FTS5: recording and metadata search still work, body search
 	// degrades to unsupported rather than erroring.
@@ -165,9 +168,24 @@ type Traffic struct {
 	upstream atomic.Pointer[url.URL]
 }
 
+// CheckLegacyCA prevents the console from serving a workspace with an old CA key.
+func CheckLegacyCA(dir string) error {
+	_, err := os.Lstat(filepath.Join(dir, "_ca", "mitmproxy-ca.pem"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check legacy proxy key: %w", err)
+	}
+	return errors.New("legacy proxy signing key in workspace: move traffic/_ca/mitmproxy-ca.pem to protected offline storage and remove the old CA from client trust stores before restarting")
+}
+
 // Open initializes the traffic tree, blob store and SQLite index under dir.
 func Open(dir, addr string) (*Traffic, error) {
-	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_blobs"), filepath.Join(dir, "_ca")} {
+	if err := CheckLegacyCA(dir); err != nil {
+		return nil, err
+	}
+	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_blobs")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
@@ -190,15 +208,32 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 
+	ca, err := cert.NewSelfSignCAMemory()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr:        addr,
 		SslInsecure: false,
-		CaRootPath:  filepath.Join(dir, "_ca"),
+		NewCaFunc:   func() (cert.CA, error) { return ca, nil },
 	})
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
+	public, err := os.CreateTemp("", "mandate-public-ca-*.pem")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	writeErr := pem.Encode(public, &pem.Block{Type: "CERTIFICATE", Bytes: ca.GetRootCA().Raw})
+	if err := errors.Join(writeErr, public.Close()); err != nil {
+		os.Remove(public.Name())
+		db.Close()
+		return nil, err
+	}
+	t.publicCertPath = public.Name()
 	// Upstream selection. By default (no global egress proxy set) targets are
 	// dialed DIRECTLY: go-mitmproxy's own default upstream uses
 	// http.ProxyFromEnvironment, so an HTTP_PROXY/HTTPS_PROXY in the environment
@@ -324,10 +359,9 @@ func ValidateProxyURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// CACertPath returns the PEM CA cert clients must trust to verify HTTPS through
-// the MITM proxy (go-mitmproxy writes it here on first start).
+// CACertPath returns the public certificate for this proxy instance.
 func (t *Traffic) CACertPath() string {
-	return filepath.Join(t.dir, "_ca", "mitmproxy-ca-cert.pem")
+	return t.publicCertPath
 }
 
 // Start runs the proxy (blocking); run in a goroutine.
@@ -340,7 +374,12 @@ func (t *Traffic) Start() error { return t.proxy.Start() }
 // shutdown for — the next deletion resumes it.
 func (t *Traffic) Close() error {
 	if t.closed != nil {
-		t.closeOnce.Do(func() { close(t.closed) })
+		t.closeOnce.Do(func() {
+			close(t.closed)
+			if t.publicCertPath != "" {
+				_ = os.Remove(t.publicCertPath)
+			}
+		})
 	}
 	t.reaping.Wait()
 	return t.db.Close()
