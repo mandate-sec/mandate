@@ -17,4 +17,6 @@ On Unix, key generation and record creation require a destination filesystem tha
 
 The default signing key is encrypted under a passphrase in ~/.mandate/keys/signer.pem. Verification uses signer.pub from the same directory. For independent verification, provision a trusted public key separately and pass its path with --trusted-key. Keep that file outside the writer's control. Signing and renewal require the encrypted private key. Never commit private keys or engagement files.
 
+If the public key was lost or key generation stopped after saving the encrypted private key, run `python mandate.py export-public-key --key path/to/signer.pem --out recovered.pub`. Use a new output path in an existing directory. The command prompts for the existing passphrase, writes the public key, and prints its fingerprint. Compare it with the previously approved fingerprint before restoring a trusted copy.
+
 An expiry date without a time means midnight UTC at the beginning of that date. Timestamps may include an explicit offset. Signatures cover UTF-8 JSON with sorted keys at every level, compact separators, no ASCII escaping and the signature field omitted. Duplicate fields are rejected. The signed schema permits only an integer for concurrency and no floating-point fields.

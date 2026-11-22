@@ -160,6 +160,17 @@ def signing_passphrase(prompt):
             raise ValueError("open a terminal that supports hidden passphrase input") from None
 
 
+def read_signing_key(path):
+    key = ser.load_pem_private_key(read_key(path), signing_passphrase("Signing passphrase: ").encode())
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError("expected encrypted Ed25519 key")
+    return key
+
+
+def public_key_pem(key):
+    return key.public_bytes(ser.Encoding.PEM, ser.PublicFormat.SubjectPublicKeyInfo)
+
+
 def rejection_message(exc):
     # Validation errors may quote fields supplied by an untrusted document.
     detail = str(exc) or type(exc).__name__
@@ -249,7 +260,10 @@ def check_approval(obj, path):
 
 
 def verify(path, key_path, now=None, allow_expired=False):
-    key = read_public_key(key_path)
+    return verify_record(path, read_public_key(key_path), now, allow_expired)
+
+
+def verify_record(path, key, now=None, allow_expired=False):
     raw = read_regular_file(path, MAX_RECORD_BYTES, "mandate exceeds size limit")
     obj = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(obj, dict) or "signature" not in obj:
@@ -267,6 +281,9 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     inspect_key = sub.add_parser("fingerprint", help="display a candidate public key fingerprint")
     inspect_key.add_argument("public_key", type=Path)
+    recover_key = sub.add_parser("export-public-key", help="re-create the public half of an encrypted signing key")
+    recover_key.add_argument("--key", type=Path, default=KEYS / "signer.pem")
+    recover_key.add_argument("--out", type=Path, required=True)
     for cmd in ("keygen", "create", "verify", "renew"):
         p = sub.add_parser(cmd)
         if cmd == "verify":
@@ -289,6 +306,13 @@ def main():
     if args.cmd == "fingerprint":
         print(fingerprint(read_public_key(args.public_key)))
         return
+    if args.cmd == "export-public-key":
+        if args.out.exists():
+            raise ValueError("choose an unused public key output path")
+        public = read_signing_key(args.key).public_key()
+        write_new(args.out, public_key_pem(public))
+        print(fingerprint(public))
+        return
     if args.cmd == "keygen":
         if args.key.exists() or args.trusted_key.exists() or args.key.resolve() == args.trusted_key.resolve():
             raise ValueError("choose unused, distinct key paths")
@@ -299,7 +323,10 @@ def main():
         for path in (args.key, args.trusted_key):
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         write_new(args.key, key.private_bytes(ser.Encoding.PEM, ser.PrivateFormat.PKCS8, ser.BestAvailableEncryption(password.encode())))
-        write_new(args.trusted_key, key.public_key().public_bytes(ser.Encoding.PEM, ser.PublicFormat.SubjectPublicKeyInfo))
+        try:
+            write_new(args.trusted_key, public_key_pem(key.public_key()))
+        except OSError as exc:
+            raise ValueError(f"encrypted signing key saved. Use export-public-key to recover its public key. {exc}") from exc
         print(fingerprint(key.public_key()))
         return
     if args.cmd == "verify":
@@ -317,15 +344,13 @@ def main():
         if details is not None:
             print(details)
         return
-    key = ser.load_pem_private_key(read_key(args.key), signing_passphrase("Signing passphrase: ").encode())
-    if not isinstance(key, Ed25519PrivateKey):
-        raise ValueError("expected encrypted Ed25519 key")
+    key = read_signing_key(args.key)
     fp = fingerprint(key.public_key())
     trusted = read_public_key(args.trusted_key)
     if fingerprint(trusted) != fp:
         raise ValueError("signing key does not match trusted key")
     if args.cmd == "renew":
-        obj = verify(args.file, args.trusted_key, allow_expired=True)
+        obj = verify_record(args.file, trusted, allow_expired=True)
         if timestamp(expiry(args.expires)) <= timestamp(obj["expires"]):
             raise ValueError("renewal must extend the expiry")
     else:

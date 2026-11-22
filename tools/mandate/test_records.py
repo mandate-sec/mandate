@@ -6,6 +6,40 @@ from unittest.mock import patch
 import mandate
 
 class Records(unittest.TestCase):
+    def test_recover_public_key_after_interrupted_keygen(self):
+        with tempfile.TemporaryDirectory() as folder:
+            private, public = (Path(folder) / name for name in ("private.pem", "public.pem"))
+            write_new = mandate.write_new
+
+            def interrupt_public_write(path, data):
+                if path == public:
+                    raise OSError("simulated public key write error")
+                write_new(path, data)
+
+            with patch.object(sys, "argv", ["mandate", "keygen", "--key", str(private), "--trusted-key", str(public)]), \
+                 patch("getpass.getpass", return_value="temporary test passphrase"), \
+                 patch.object(mandate, "write_new", side_effect=interrupt_public_write):
+                with self.assertRaisesRegex(ValueError, "Use export-public-key"):
+                    mandate.main()
+
+            self.assertFalse(public.exists())
+            encrypted = private.read_bytes()
+            argv = ["mandate", "export-public-key", "--key", str(private), "--out", str(public)]
+            with patch.object(sys, "argv", argv), patch("getpass.getpass", return_value="wrong passphrase"):
+                with self.assertRaises(ValueError):
+                    mandate.main()
+            self.assertFalse(public.exists())
+            with patch.object(sys, "argv", argv), patch("getpass.getpass", return_value="temporary test passphrase"), \
+                 patch("sys.stdout", new_callable=StringIO) as output:
+                mandate.main()
+                with self.assertRaisesRegex(ValueError, "unused public key"):
+                    mandate.main()
+            recovered = mandate.read_public_key(public)
+            original = mandate.ser.load_pem_private_key(encrypted, b"temporary test passphrase").public_key()
+            self.assertEqual(mandate.fingerprint(recovered), mandate.fingerprint(original))
+            self.assertEqual(output.getvalue().strip(), mandate.fingerprint(original))
+            self.assertEqual(private.read_bytes(), encrypted)
+
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
@@ -87,7 +121,9 @@ class Records(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         run("verify", "--approval", str(grant))
             with self.assertRaises(ValueError): mandate.verify(record,public,now+timedelta(days=2))
-            run("renew","--expires",(now+timedelta(days=3)).isoformat())
+            with patch.object(mandate, "read_public_key", wraps=mandate.read_public_key) as trusted:
+                run("renew","--expires",(now+timedelta(days=3)).isoformat())
+            trusted.assert_called_once_with(public)
             run("verify")
             data=json.loads(record.read_text()); data["scope"]["targets"]=["other.example"]
             record.write_text(json.dumps(data))
