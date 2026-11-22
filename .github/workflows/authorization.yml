@@ -89,3 +89,8 @@ jobs:
             fi
             [[ "$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")" == "$previous" ]]
           done
+          psql -v ON_ERROR_STOP=1 -c 'CREATE DATABASE "recovery=fixture"'
+          PGDATABASE='recovery=fixture' psql -v ON_ERROR_STOP=1 -c 'CREATE TABLE settings (key text PRIMARY KEY, value text NOT NULL, updated_at timestamptz DEFAULT now())'
+          bash reset-password.sh -m local -H "$PGHOST" -P "$PGPORT" -U "$PGUSER" -d 'recovery=fixture' -p fixture-literal -y
+          [[ "$(PGDATABASE='recovery=fixture' psql -Atc "SELECT count(*) FROM settings")" == "2" ]]
+          [[ "$(psql -Atc "SELECT value FROM settings WHERE key='auth.session_generation'")" == "$previous" ]]

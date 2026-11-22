@@ -183,16 +183,19 @@ if [[ "$MODE" == "local" ]]; then
 
   declare -a PSQL_ARGS=()
   if [[ -n "$DSN" ]]; then
-    PSQL_ARGS=("$DSN")
+    PSQL_ARGS=(--dbname="$DSN")
     target="configured PostgreSQL connection (credentials hidden)"
   else
     [[ -n "$USER"   ]] || die "missing database user (-U) or a valid config.json/DSN"
     [[ -n "$DBNAME" ]] || die "missing database name (-d) or a valid config.json/DSN"
     HOST="${HOST:-127.0.0.1}"; PORT="${PORT:-5432}"; SSLMODE="${SSLMODE:-disable}"
-    PSQL_ARGS=(-h "$HOST" -p "$PORT" -U "$USER" -d "$DBNAME")
+    # psql interprets a -d value containing "=" as connection settings.
+    # PGDATABASE supplies the literal database name as a libpq default.
+    export PGDATABASE="$DBNAME"
+    PSQL_ARGS=(-h "$HOST" -p "$PORT" -U "$USER")
     [[ -n "$SSLMODE" ]] && export PGSSLMODE="$SSLMODE"
     [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
-    target="$USER@$HOST:$PORT/$DBNAME"
+    printf -v target '%q@%q:%q/%q' "$USER" "$HOST" "$PORT" "$DBNAME"
   fi
 
   info "Target database: $target"
