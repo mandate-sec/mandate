@@ -62,3 +62,24 @@ func TestSessionKeyRefusesWorkspaceAndCorruption(t *testing.T) {
 		t.Fatal("unexpected rewrite of damaged key")
 	}
 }
+
+func TestSessionKeyChecksOpenedFileIdentity(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"expected", "different"} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, 32), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expected, err := os.Lstat(filepath.Join(dir, "expected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	different, err := os.Open(filepath.Join(dir, "different"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer different.Close()
+	if key, err := readSessionKey(different, expected); err == nil || key != nil {
+		t.Fatal("accepted a different file of the expected size")
+	}
+}

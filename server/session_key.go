@@ -62,17 +62,33 @@ func loadOrCreateJWTKey(baseDir, dataDir string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || !sessionKeyOwned(info) || info.Size() != 32 || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
-		return nil, errors.New("invalid session key file type, length or permissions")
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("session key must be a regular file")
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	key := make([]byte, 32)
-	_, err = io.ReadFull(f, key)
-	return key, err
+	return readSessionKey(f, info)
+}
+
+func readSessionKey(f *os.File, expected os.FileInfo) ([]byte, error) {
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(expected, opened) || !opened.Mode().IsRegular() || !sessionKeyOwned(opened) || opened.Size() != 32 || (runtime.GOOS != "windows" && opened.Mode().Perm()&0077 != 0) {
+		return nil, errors.New("invalid session key file identity, type, length or permissions")
+	}
+	key, err := io.ReadAll(io.LimitReader(f, 33))
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 {
+		return nil, errors.New("session key length changed during read")
+	}
+	return key, nil
 }
 
 func createSessionKey(dir, path string) error {
