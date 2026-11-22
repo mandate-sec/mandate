@@ -160,7 +160,9 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	existing, generation, err := pg.AdminCredentials()
+	ctx, cancel := context.WithTimeout(r.Context(), sessionCheckTimeout)
+	defer cancel()
+	existing, generation, err := pg.AdminCredentialsContext(ctx)
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -190,7 +192,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	// 用 INSERT ... ON CONFLICT DO NOTHING 而不是 upsert：上面那次 GetSetting 只是
 	// 快速失败路径，真正"仅首次可设"的保证落在主键约束上。bcrypt 要跑几十毫秒，
 	// 这期间别的请求完全可能先把密码设好，而读检查本身也可能因故障而失效。
-	inserted, err := pg.InsertSettingIfAbsent(authPassKey, string(hash))
+	inserted, err := pg.InsertSettingIfAbsentContext(ctx, authPassKey, string(hash))
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -235,7 +237,9 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	hash, generation, err := pg.AdminCredentials()
+	ctx, cancel := context.WithTimeout(r.Context(), sessionCheckTimeout)
+	defer cancel()
+	hash, generation, err := pg.AdminCredentialsContext(ctx)
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -257,7 +261,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "密码加密失败")
 		return
 	}
-	changed, err := pg.ChangeAdminPassword(hash, string(newHash), rand.Text())
+	changed, err := pg.ChangeAdminPasswordContext(ctx, hash, string(newHash), rand.Text())
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return
@@ -293,7 +297,9 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	hash, generation, err := pg.AdminCredentials()
+	ctx, cancel := context.WithTimeout(r.Context(), sessionCheckTimeout)
+	defer cancel()
+	hash, generation, err := pg.AdminCredentialsContext(ctx)
 	if err != nil {
 		writeErr(w, 503, errDataSourceUnavailable)
 		return

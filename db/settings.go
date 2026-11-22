@@ -37,7 +37,11 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key
 // 调用方先 GetSetting 再写的那种检查就只是快速失败路径——读出错或并发撞车时，
 // 已有的值也不会被 ON CONFLICT DO UPDATE 顺手覆盖掉。
 func (d *DB) InsertSettingIfAbsent(key, value string) (inserted bool, err error) {
-	res, err := d.Exec(`
+	return d.InsertSettingIfAbsentContext(context.Background(), key, value)
+}
+
+func (d *DB) InsertSettingIfAbsentContext(ctx context.Context, key, value string) (inserted bool, err error) {
+	res, err := d.ExecContext(ctx, `
 INSERT INTO settings(key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO NOTHING`, key, value)
 	if err != nil {

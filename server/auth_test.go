@@ -69,6 +69,32 @@ func TestSetupStatusTimeoutDoesNotReportUninitialized(t *testing.T) {
 	}
 }
 
+func TestLoginReleasesSlotWhenDatabaseStalls(t *testing.T) {
+	store, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.SetMaxOpenConns(1)
+	conn, err := store.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	release := time.AfterFunc(3*sessionCheckTimeout, func() { _ = conn.Close() })
+	defer release.Stop()
+	s := &Server{m: &Manager{pg: &db.DB{DB: store}}}
+	req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"ARTEX","password":"fixture"}`))
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable || store.Stats().WaitCount == 0 || !release.Stop() {
+		t.Fatalf("expected login to time out before the connection was released, got status %d", w.Code)
+	}
+	if s.passwordAttempts.active != 0 {
+		t.Fatal("timed-out login retained a password-check slot")
+	}
+}
+
 func TestAdminPasswordComparisonByteLimit(t *testing.T) {
 	password := strings.Repeat("界", 24)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
