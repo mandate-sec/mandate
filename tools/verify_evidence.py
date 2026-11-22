@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import re
+import stat
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -19,6 +20,7 @@ REPORT_ENTRY = re.compile(r"[^/\\:\x00-\x1f]+\.md")
 BODY_HASH = re.compile(r"[0-9a-f]{64}")
 CHUNK_SIZE = 1024 * 1024
 MANIFEST_LIMIT = 32 * CHUNK_SIZE
+DEFAULT_UNCOMPRESSED_LIMIT = 8 * 1024 * CHUNK_SIZE
 SIGNATURE_NAMESPACE = "mandate-evidence"
 # Match the fields Mandate masks at capture time. Older exports can still contain them.
 SENSITIVE_HEADERS = frozenset({
@@ -129,11 +131,26 @@ def check_binding(archive, finding_id, binding_id, files, preview):
         raise ValueError("missing or malformed evidence files or metadata") from error
 
 
-def verify_archive(file, preview=None):
+def check_archive_limits(entries, max_uncompressed):
+    total = 0
+    for entry in entries:
+        if entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            raise ValueError("unsupported ZIP compression method")
+        mode = stat.S_IFMT(entry.external_attr >> 16)
+        if entry.create_system == 3 and mode not in (0, stat.S_IFREG):
+            raise ValueError("findings ZIP contains a non-regular file")
+        total += entry.file_size
+        if total > max_uncompressed:
+            raise ValueError("uncompressed ZIP size exceeds the verification limit")
+
+
+def verify_archive(file, preview=None, max_uncompressed=DEFAULT_UNCOMPRESSED_LIMIT):
     with zipfile.ZipFile(file) as archive:
+        entries = archive.infolist()
+        check_archive_limits(entries, max_uncompressed)
         seen = set()
         bindings = {}
-        for entry in archive.infolist():
+        for entry in entries:
             name = entry.filename
             if name != entry.orig_filename or name.casefold() in seen:
                 raise ValueError("ambiguous or duplicate archive entry")
@@ -165,7 +182,11 @@ def main():
     parser.add_argument("--allowed-signers", help="trusted OpenSSH allowed signers file")
     parser.add_argument("--signer", help="expected identity in the allowed signers file")
     parser.add_argument("--sharing-preview", action="store_true", help="summarize included evidence and recognized redactions")
+    parser.add_argument("--max-uncompressed-bytes", type=int, default=DEFAULT_UNCOMPRESSED_LIMIT,
+                        help="maximum uncompressed ZIP size to verify (default: 8 GiB)")
     args = parser.parse_args()
+    if args.max_uncompressed_bytes < 1:
+        parser.error("--max-uncompressed-bytes must be positive")
     verify_signature = any((args.signature, args.allowed_signers, args.signer))
     if verify_signature and not all((args.signature, args.allowed_signers, args.signer)):
         parser.error("signature verification requires --signature, --allowed-signers, and --signer")
@@ -182,7 +203,7 @@ def main():
                 if result.returncode:
                     raise ValueError("signature verification failed")
                 file.seek(0)
-            count = verify_archive(file, preview)
+            count = verify_archive(file, preview, args.max_uncompressed_bytes)
     except (EOFError, OSError, RuntimeError, ValueError, zipfile.BadZipFile, zlib.error) as error:
         print(f"Verification failed: {str(error)!r}", file=sys.stderr)
         return 1

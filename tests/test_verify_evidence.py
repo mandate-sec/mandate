@@ -3,10 +3,12 @@ import io
 import json
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import warnings
 import zipfile
 
@@ -68,6 +70,26 @@ class VerifyEvidenceTests(unittest.TestCase):
                 warnings.simplefilter("ignore", UserWarning)
                 with self.assertRaises(ValueError):
                     verify_evidence.verify_archive(make_zip([("report.md", "a"), (name, "b")]))
+
+    def test_checks_total_size_before_opening_any_members(self):
+        bundle = make_zip([("first.md", "first"), ("second.md", "second")])
+        self.assertEqual(verify_evidence.verify_archive(bundle, max_uncompressed=11), 0)
+        with mock.patch.object(zipfile.ZipFile, "open", side_effect=AssertionError("unexpected read")):
+            with self.assertRaisesRegex(ValueError, "uncompressed ZIP size"):
+                verify_evidence.verify_archive(bundle, max_uncompressed=10)
+
+    def test_accepts_regular_files_and_rejects_nonstandard_archive_entries(self):
+        regular = zipfile.ZipInfo("report.md")
+        regular.create_system = 3
+        regular.external_attr = (stat.S_IFREG | 0o600) << 16
+        self.assertEqual(verify_evidence.verify_archive(make_zip([(regular, "report")])), 0)
+        regular.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with self.assertRaisesRegex(ValueError, "non-regular file"):
+            verify_evidence.verify_archive(make_zip([(regular, "report")]))
+        regular.external_attr = (stat.S_IFREG | 0o600) << 16
+        regular.compress_type = zipfile.ZIP_BZIP2
+        with self.assertRaisesRegex(ValueError, "unsupported ZIP compression"):
+            verify_evidence.verify_archive(make_zip([(regular, "report")]))
 
     def test_sharing_preview_shows_counts_without_exposing_values(self):
         entries = fixture_entries()
