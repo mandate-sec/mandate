@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -109,5 +110,29 @@ func TestValidatePassword(t *testing.T) {
 				t.Fatalf("validatePassword(%q)=%q, wantErr=%v", tc.pw, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestAuthEndpointsRejectInvalidBodiesBeforeDatabase(t *testing.T) {
+	s := new(Server)
+	for _, handler := range []http.HandlerFunc{s.authInit, s.authLogin, s.authChangePassword} {
+		for _, tc := range []struct {
+			body string
+			code int
+		}{
+			{"{}" + strings.Repeat(" ", 8191), 413},
+			{"{} {}", 400},
+		} {
+			w := httptest.NewRecorder()
+			handler(w, httptest.NewRequest("POST", "/", strings.NewReader(tc.body)))
+			if w.Code != tc.code {
+				t.Fatalf("response %d, want %d", w.Code, tc.code)
+			}
+		}
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/", strings.NewReader("{}" + strings.Repeat(" ", 8190)))
+	if !readAuthRequest(w, r, &struct{}{}) {
+		t.Fatal("valid document exactly at the limit was rejected")
 	}
 }

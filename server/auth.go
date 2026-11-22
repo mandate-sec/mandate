@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -106,9 +109,33 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
+// Read the entire bounded document so trailing values and over-limit padding
+// cannot be hidden behind a valid first JSON value.
+func readAuthRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	const limit = 8192
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeErr(w, http.StatusRequestEntityTooLarge, "请求体过大")
+		return false
+	}
+	if err != nil || json.Unmarshal(body, dst) != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式错误")
+		return false
+	}
+	return true
+}
+
 // POST /api/auth/init — sets the password for the first time; rejected if already set.
 func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	var req struct {
+		Password   string `json:"password"`
+		SetupToken string `json:"setupToken"`
+	}
+	if !readAuthRequest(w, r, &req) {
+		return
+	}
+
 	pg := s.pg(w)
 	if pg == nil {
 		return
@@ -122,11 +149,8 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "密码已设置")
 		return
 	}
-	var req struct {
-		Password   string `json:"password"`
-		SetupToken string `json:"setupToken"`
-	}
-	if err := decode(r, &req); err != nil || req.Password == "" {
+
+	if req.Password == "" {
 		writeErr(w, 400, "密码不能为空")
 		return
 	}
@@ -165,19 +189,19 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/change-password requires a current session and the current password.
 func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	pg := s.pg(w)
-	if pg == nil {
-		return
-	}
 	var req struct {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+	if !readAuthRequest(w, r, &req) {
 		return
 	}
+
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+
 	if req.NewPassword == "" {
 		writeErr(w, 400, "新密码不能为空")
 		return
@@ -227,19 +251,19 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/login — validates username/password and returns a JWT.
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	pg := s.pg(w)
-	if pg == nil {
-		return
-	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+	if !readAuthRequest(w, r, &req) {
 		return
 	}
+
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+
 	if req.Username != "ARTEX" {
 		writeErr(w, 401, "用户名或密码错误")
 		return
