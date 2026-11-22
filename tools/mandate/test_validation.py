@@ -13,6 +13,13 @@ import mandate
 
 
 class ValidationTests(unittest.TestCase):
+    def test_network_masks_require_unambiguous_prefix_lengths(self):
+        for value in ("0.0.0.0/0.0.0.0", "192.0.2.0/0.0.0.255", "192.0.2.0/255.255.255.0", "192.0.2.0/024"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "CIDR prefix"):
+                mandate.target(value)
+        for value in ("0.0.0.0/0", "192.0.2.0/24", "2001:db8::1/128"):
+            mandate.target(value)
+
     def test_device_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "regular file"):
             mandate.read_key(Path(os.devnull))

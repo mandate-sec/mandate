@@ -62,6 +62,8 @@ def expiry(value):
 
 
 def target(value):
+    if "/" in value and not re.fullmatch(r"0|[1-9][0-9]{0,2}", value.partition("/")[2]):
+        raise ValueError("use a decimal CIDR prefix length")
     if "%" in value:
         raise ValueError("scope identifiers are not allowed in addresses")
     try:
@@ -147,7 +149,7 @@ def rejection_message(exc):
     detail = str(exc) or type(exc).__name__
     excerpt = detail[:240]
     safe = "".join(ch if ch.isprintable() else ascii(ch)[1:-1] for ch in excerpt)
-    return "Mandate rejected: " + safe + ("…" if len(detail) > len(excerpt) else "")
+    return "Mandate rejected: " + safe + ("â€¦" if len(detail) > len(excerpt) else "")
 
 
 def signed(obj, key):
