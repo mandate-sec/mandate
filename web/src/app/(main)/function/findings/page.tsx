@@ -1235,9 +1235,15 @@ export default function FindingsPage() {
                 <label htmlFor="export-format-md-single" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-md-single" value="md-single" /> Markdown summary report (single .md file)
                 </label>
-                <label htmlFor="export-format-md-zip" className="flex items-center gap-2 text-sm">
-                  <RadioGroupItem id="export-format-md-zip" value="md-zip" /> Separate Markdown files (one .md per finding, packed as .zip)
-                </label>
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="export-format-md-zip" className="flex items-center gap-2 text-sm">
+                    <RadioGroupItem id="export-format-md-zip" value="md-zip" aria-describedby="export-zip-evidence" />
+                    Markdown reports and linked evidence (.zip)
+                  </label>
+                  <p id="export-zip-evidence" className="pl-6 text-xs text-muted-foreground">
+                    Includes full HTTP request and response bodies when evidence is linked. Review before sharing.
+                  </p>
+                </div>
                 <label htmlFor="export-format-csv" className="flex items-center gap-2 text-sm">
                   <RadioGroupItem id="export-format-csv" value="csv" /> CSV table (.csv)
                 </label>
