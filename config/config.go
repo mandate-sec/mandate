@@ -107,11 +107,18 @@ func Load() Config {
 
 func loadFile(path string) (Config, error) {
 	var c Config
-	f, err := os.Open(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|configOpenFlags, 0)
 	if err != nil {
 		return c, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return c, err
+	}
+	if !info.Mode().IsRegular() {
+		return c, fmt.Errorf("configuration must be a regular file")
+	}
 	const maxBytes = 1 << 20
 	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
